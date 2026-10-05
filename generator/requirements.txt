@@ -1,0 +1,2 @@
+pyarrow>=18,<23
+PyYAML>=6,<7

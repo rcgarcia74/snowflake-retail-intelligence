@@ -1,0 +1,9 @@
+# Import names and non-sensitive values only. Bind AWS authentication through
+# workload identity or a secret-backed controller service in Openflow.
+AWS_REGION: us-east-1
+S3_BUCKET: replace-with-your-bucket
+S3_PREFIX: retail-demo/landing/openflow/
+SNOWFLAKE_DATABASE: RETAIL_DEMO
+SNOWFLAKE_SCHEMA: RAW
+SNOWFLAKE_WAREHOUSE: RETAIL_DEMO_WH
+SNOWFLAKE_AUTHENTICATION_STRATEGY: SNOWFLAKE_MANAGED

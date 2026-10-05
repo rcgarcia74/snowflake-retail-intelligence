@@ -1,0 +1,27 @@
+# Local credentials and environment
+.env
+*.p8
+*.pem
+streaming/producer/profile.json
+
+# Generated and exported data
+data/
+generated/
+build/
+*.parquet
+*.jsonl
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Metabase application state
+metabase/metabase-data/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,61 @@
+version: 1
+name: retail-demo-operational-files
+purpose: Ingest supplier, purchase-order, receipt, and merchant-plan JSONL from S3.
+
+source:
+  processor_chain:
+    - ListS3
+    - FetchS3Object
+    - RouteOnAttribute
+  bucket_parameter: S3_BUCKET
+  region_parameter: AWS_REGION
+  include_prefix: retail-demo/landing/openflow/
+  file_pattern: ".*\\.jsonl$"
+  listing_strategy: tracking-entities
+  initial_listing_target: all-available
+
+records:
+  reader: JsonTreeReader
+  schema_strategy: infer-schema
+  parsing_strategy: strict
+
+routes:
+  - prefix: retail-demo/landing/openflow/supplier/
+    processor: PutDatabaseRecord
+    table: RETAIL_DEMO.RAW.SUPPLIER
+    statement_type: INSERT
+  - prefix: retail-demo/landing/openflow/current_purchase_orders/
+    processor: PutDatabaseRecord
+    table: RETAIL_DEMO.RAW.PURCHASE_ORDER
+    statement_type: INSERT
+  - prefix: retail-demo/landing/openflow/current_receipts/
+    processor: PutDatabaseRecord
+    table: RETAIL_DEMO.RAW.RECEIPT
+    statement_type: INSERT
+  - prefix: retail-demo/landing/openflow/merchant_plan/
+    processor: PutDatabaseRecord
+    table: RETAIL_DEMO.RAW.MERCHANT_PLAN
+    statement_type: INSERT
+
+snowflake:
+  authentication_strategy: SNOWFLAKE_MANAGED
+  connection_service: SnowflakeConnectionService
+  database: RETAIL_DEMO
+  schema: RAW
+  warehouse: RETAIL_DEMO_WH
+  unmatched_field_behavior: FAIL
+  unmatched_column_behavior: IGNORE
+
+failure_handling:
+  retry_relationship: retry-with-bounded-backoff
+  failure_relationship: dead-letter-queue
+  preserve_original_flowfile: true
+  stop_gate_on_failure: true
+
+readiness:
+  expected_files: 4
+  expected_tables:
+    - RETAIL_DEMO.RAW.SUPPLIER
+    - RETAIL_DEMO.RAW.PURCHASE_ORDER
+    - RETAIL_DEMO.RAW.RECEIPT
+    - RETAIL_DEMO.RAW.MERCHANT_PLAN

@@ -1,0 +1,26 @@
+# Copy this file only if you want a second named scenario. The checked-in
+# scenario.yaml is safe to run as-is and contains no credentials.
+version: 1
+
+cohort:
+  item_count: 20
+  store_count: 25
+  baseline_days: 84
+  minimum_item_store_pairs: 100
+
+generation:
+  seed: 20261005
+  history_days: 90
+  hot_days: 7
+  supplier_count: 5
+  plan_growth_rate: 0.05
+
+failure_scenario:
+  affected_item_count: 3
+  affected_store_count: 8
+  degraded_fill_rate: 0.42
+  healthy_fill_rate: 0.98
+
+thresholds:
+  risk_days_of_supply: 2.0
+  max_generated_bytes: 100000000
