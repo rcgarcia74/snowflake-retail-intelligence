@@ -1,5 +1,32 @@
 # 05 — Upload history and create Iceberg tables
 
+## 0. Load and verify repository environment
+
+Do not rely on inherited shell variables from another project.
+
+```bash
+set -a
+source .env
+set +a
+
+printf 'S3_BUCKET=%s\nS3_ROOT=%s\n' "$S3_BUCKET" "$S3_ROOT"
+
+test "$S3_BUCKET" = "snowflake-retail-demo-rommelg" || {
+  echo "ERROR: unexpected S3_BUCKET: $S3_BUCKET"
+  exit 1
+}
+
+test "$S3_ROOT" = "retail-demo" || {
+  echo "ERROR: unexpected S3_ROOT: $S3_ROOT"
+  exit 1
+}
+
+Expected:
+S3_BUCKET=snowflake-retail-demo-rommelg
+S3_ROOT=retail-demo
+
+Do not continue if either value differs.
+
 ## 1. Upload only validated files
 
 ```bash
