@@ -9,7 +9,8 @@ set -a
 source .env
 set +a
 
-printf 'S3_BUCKET=%s\nS3_ROOT=%s\n' "$S3_BUCKET" "$S3_ROOT"
+printf 'S3_BUCKET=%s\nS3_ROOT=%s\nSNOWFLAKE_CONNECTION=%s\n' \
+  "$S3_BUCKET" "$S3_ROOT" "$SNOWFLAKE_CONNECTION"
 
 test "$S3_BUCKET" = "snowflake-retail-demo-rommelg" || {
   echo "ERROR: unexpected S3_BUCKET: $S3_BUCKET"
@@ -21,11 +22,21 @@ test "$S3_ROOT" = "retail-demo" || {
   exit 1
 }
 
+test "$SNOWFLAKE_CONNECTION" = "retail_demo" || {
+  echo "ERROR: unexpected SNOWFLAKE_CONNECTION: $SNOWFLAKE_CONNECTION"
+  exit 1
+}
+```
+
 Expected:
+
+```text
 S3_BUCKET=snowflake-retail-demo-rommelg
 S3_ROOT=retail-demo
+SNOWFLAKE_CONNECTION=retail_demo
+```
 
-Do not continue if either value differs.
+Do not continue if any value differs.
 
 ## 1. Upload only validated files
 
@@ -45,7 +56,55 @@ List and compare object counts and byte totals. Do not sync anything to `iceberg
 
 ## 2. Create and load Snowflake-managed Iceberg
 
-Ask CoCo to review column casts and external-volume access, then run:
+Before executing the DDL, verify the external volume and review the SQL.
+
+### 2.1 Verify the external-volume trust relationship
+
+The storage integration and external volume are separate Snowflake-to-AWS trust relationships. Do not assume they use the same Snowflake IAM principal or external ID.
+
+For `RETAIL_DEMO_EXT_VOL`, the AWS `SnowflakeExternalVolume` trust statement must match the current values returned by:
+
+```sql
+DESC EXTERNAL VOLUME RETAIL_DEMO_EXT_VOL;
+```
+
+Specifically verify:
+
+- `STORAGE_AWS_IAM_USER_ARN` matches the AWS trust-policy `Principal.AWS`.
+- `STORAGE_AWS_EXTERNAL_ID` matches the AWS trust-policy `sts:ExternalId`.
+- The trust statement allows `sts:AssumeRole` on `SnowflakeRetailDemoRole`.
+
+Do not copy the storage integration's external ID into the external-volume trust statement.
+
+After the AWS trust policy is configured, verify Snowflake can use the external volume:
+
+```bash
+snow sql -c retail_demo_admin \
+  -q "SELECT SYSTEM\$VERIFY_EXTERNAL_VOLUME('RETAIL_DEMO_EXT_VOL');"
+```
+
+Do not continue unless the result reports `"success": true` and the storage-location, write, read, list, delete, and AWS-role validation checks pass.
+
+### 2.2 Review the Iceberg DDL
+
+Ask CoCo to **review only** `sql/03_iceberg/01_create_iceberg_tables.sql`. Do not ask CoCo to execute the script.
+
+Confirm that:
+
+- Integer Iceberg columns and casts use explicit precision and scale, such as `NUMBER(38,0)`.
+- No bare `NUMBER` or `DECIMAL` types remain in the Iceberg table definitions or load casts.
+- Decimal measures retain their intended explicit precision and scale.
+- All three tables use `CATALOG = 'SNOWFLAKE'`.
+- Each table has a distinct `BASE_LOCATION`.
+- `COPY INTO` reads only from the S3 landing stage.
+- Raw source files are never written directly into the Iceberg-owned prefix.
+- `FORCE = TRUE` is not used.
+
+CoCo review is an engineering aid, not an execution or compatibility gate. Snowflake execution is authoritative.
+
+### 2.3 Create and load the Iceberg tables
+
+Execute the script with the engineer connection (`retail_demo`), not the role-restricted admin connection:
 
 ```bash
 snow sql -c "$SNOWFLAKE_CONNECTION" \
@@ -54,7 +113,7 @@ snow sql -c "$SNOWFLAKE_CONNECTION" \
 ```
 
 The DDL sets `CATALOG = 'SNOWFLAKE'` and a distinct `BASE_LOCATION` for each table. `COPY INTO`
-reads the landing Parquet; Snowflake writes valid Iceberg metadata and Parquet to the external
+reads the landing Parquet; Snowflake writes the managed Iceberg metadata and Parquet to the external
 volume.
 
 ## 3. Verify

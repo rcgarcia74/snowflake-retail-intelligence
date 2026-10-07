@@ -1,0 +1,30 @@
+# Version control
+.git
+.gitignore
+
+# Local credentials and environment
+.env
+*.p8
+*.pem
+streaming/producer/profile.json
+
+# Python/local development
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+*.pyc
+*.pyo
+
+# Generated and exported data
+data
+generated
+build
+*.parquet
+*.jsonl
+
+# Local application/editor state
+metabase/metabase-data
+.DS_Store
+.idea
+.vscode

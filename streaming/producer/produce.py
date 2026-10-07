@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,20 @@ def selected(row: dict[str, Any], through_date: str | None) -> bool:
     return through_date is None or str(row["event_ts"])[:10] <= through_date
 
 
+def parse_offset(token: str | None) -> int:
+    if token is None:
+        return 0
+    try:
+        offset = int(token)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError(
+            f"expected numeric Snowpipe Streaming offset token, got {token!r}"
+        ) from error
+    if offset < 0:
+        raise RuntimeError(f"expected non-negative Snowpipe Streaming offset token, got {token!r}")
+    return offset
+
+
 def dry_run(input_dir: Path, through_date: str | None) -> int:
     total = 0
     for name, stream in STREAMS.items():
@@ -51,7 +66,7 @@ def publish(input_dir: Path, profile: Path, pace_ms: int, through_date: str | No
     except ImportError as error:
         raise SystemExit(
             "live mode requires the snowpipe-streaming package; "
-            "install streaming/producer/requirements.txt"
+            "use the Docker runtime documented in docs/07-snowpipe-streaming.md"
         ) from error
 
     for name, stream in STREAMS.items():
@@ -63,26 +78,30 @@ def publish(input_dir: Path, profile: Path, pace_ms: int, through_date: str | No
             pipe_name=stream["pipe"],
             profile_json=str(profile),
         )
-        channel, status = client.open_channel(stream["channel"], "0")
-        committed = int(status.latest_committed_offset_token or "0")
-        final_offset = committed
-        for offset, row in enumerate(rows, start=1):
-            if offset <= committed:
-                continue
-            if not selected(row, through_date):
-                break
-            channel.append_row(row, str(offset))
-            final_offset = offset
-            if pace_ms:
-                time.sleep(pace_ms / 1000)
-        if final_offset > committed:
-            channel.wait_for_commit(
-                lambda token: token is not None and int(token) >= final_offset,
-                timeout_seconds=120,
-            )
-        channel.close()
-        client.close()
-        print(f"PASS {name}: committed through offset {final_offset:,}")
+        channel = None
+        try:
+            channel, status = client.open_channel(stream["channel"])
+            committed = parse_offset(status.latest_committed_offset_token)
+            final_offset = committed
+            for offset, row in enumerate(rows, start=1):
+                if offset <= committed:
+                    continue
+                if not selected(row, through_date):
+                    break
+                channel.append_row(row, str(offset))
+                final_offset = offset
+                if pace_ms:
+                    time.sleep(pace_ms / 1000)
+            if final_offset > committed:
+                channel.wait_for_commit(
+                    lambda token: token is not None and parse_offset(token) >= final_offset,
+                    timeout_seconds=120,
+                )
+            print(f"PASS {name}: committed through offset {final_offset:,}")
+        finally:
+            if channel is not None:
+                channel.close()
+            client.close()
     return 0
 
 
@@ -102,6 +121,11 @@ def main() -> int:
     args = parser.parse_args()
     if args.pace_ms < 0:
         raise SystemExit("--pace-ms cannot be negative")
+    if args.through_date is not None:
+        try:
+            date.fromisoformat(args.through_date)
+        except ValueError as error:
+            raise SystemExit("--through-date must be a valid date in YYYY-MM-DD format") from error
     if not args.live:
         return dry_run(args.input, args.through_date)
     return publish(args.input, args.profile, args.pace_ms, args.through_date)

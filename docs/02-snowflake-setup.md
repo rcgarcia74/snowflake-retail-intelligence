@@ -26,8 +26,37 @@ snow sql -c "$SNOWFLAKE_CONNECTION" \
   -D "s3_iceberg_url=s3://$S3_BUCKET/$S3_ROOT/iceberg/"
 ```
 
-Stop after `DESCRIBE`. Add the returned Snowflake IAM principals and external IDs to the AWS role's
-trust policy, while preserving the prefix-scoped permissions. Then create and test the stage:
+Stop after `DESCRIBE`. The storage integration and external volume establish **separate AWS trust
+relationships**, even when they use the same AWS IAM role.
+
+From the setup-script output, record the trust values for each object separately:
+
+- `RETAIL_DEMO_S3_INTEGRATION`: its Snowflake IAM principal and external ID.
+- `RETAIL_DEMO_EXT_VOL`: its Snowflake IAM principal and external ID.
+
+Configure the AWS role `SnowflakeRetailDemoRole` with separate trust-policy statements for the
+storage integration and external volume. For each statement:
+
+- `Principal.AWS` must exactly match that object's current Snowflake IAM principal.
+- `sts:ExternalId` must exactly match that object's current Snowflake external ID.
+- `Action` must allow `sts:AssumeRole`.
+
+Do not reuse the storage integration's external ID for the external volume. Snowflake can generate
+different principals and external IDs for these objects, and the AWS trust policy must match the
+values currently returned by Snowflake.
+
+After updating the AWS trust policy, verify the external volume before attempting to create Iceberg
+tables:
+
+```bash
+snow sql -c retail_demo_admin \
+  -q "SELECT SYSTEM\$VERIFY_EXTERNAL_VOLUME('RETAIL_DEMO_EXT_VOL');"
+```
+
+Do not continue unless the result reports `"success": true` and the storage-location, write, read,
+list, delete, and AWS-role validation checks pass.
+
+Then create and test the landing stage:
 
 ```bash
 snow sql -c "$SNOWFLAKE_CONNECTION" \

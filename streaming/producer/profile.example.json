@@ -1,7 +1,7 @@
 {
   "account": "ORG-ACCOUNT",
-  "authorization_type": "KEYPAIR",
-  "private_key": "/absolute/path/outside/this/repository/rsa_key.p8",
+  "authorization_type": "JWT",
+  "private_key_file": "/absolute/path/outside/this/repository/rsa_key.p8",
   "role": "RETAIL_DEMO_STREAMER",
   "url": "https://ORG-ACCOUNT.snowflakecomputing.com",
   "user": "RETAIL_DEMO_STREAM_USER"

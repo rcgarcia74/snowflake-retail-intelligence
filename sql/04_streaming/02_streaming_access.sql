@@ -1,5 +1,8 @@
--- Optional least-privilege role for a dedicated producer identity.
-USE ROLE SECURITYADMIN;
+-- Least-privilege role for the dedicated Snowpipe Streaming producer.
+-- Run this script with an administrative connection that can CREATE ROLE,
+-- manage object grants, and grant the role to the streaming user.
+-- The script intentionally does not USE ROLE so it also works with
+-- connections whose authentication policy restricts role switching.
 CREATE ROLE IF NOT EXISTS RETAIL_DEMO_STREAMER;
 GRANT USAGE ON DATABASE RETAIL_DEMO TO ROLE RETAIL_DEMO_STREAMER;
 GRANT USAGE ON SCHEMA RETAIL_DEMO.RAW TO ROLE RETAIL_DEMO_STREAMER;
