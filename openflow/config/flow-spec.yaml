@@ -1,6 +1,12 @@
-version: 1
+version: 2
 name: retail-demo-operational-files
 purpose: Ingest supplier, purchase-order, receipt, and merchant-plan JSONL from S3.
+
+implementation:
+  deployment_generation: 2
+  type: custom-process-group
+  connector_object: false
+  note: Custom canvas flows are not schema-level gen 2 OPENFLOW CONNECTOR objects.
 
 source:
   processor_chain:
@@ -9,33 +15,117 @@ source:
     - RouteOnAttribute
   bucket_parameter: S3_BUCKET
   region_parameter: AWS_REGION
+  credentials_service: RetailDemoAwsCredentials
+  include_prefix_parameter: S3_PREFIX
   include_prefix: retail-demo/landing/openflow/
   file_pattern: ".*\\.jsonl$"
-  listing_strategy: tracking-entities
+  listing_strategy: tracking-timestamps
   initial_listing_target: all-available
+  primary_node_only: true
+
+controller_services:
+  - name: RetailDemoSnowflakeConnection
+    type: SnowflakeConnectionService
+    authentication_strategy: SNOWFLAKE_MANAGED
+    authentication_strategy_ui_label: Snowflake Managed Token
+    account_parameter: SNOWFLAKE_ACCOUNT_IDENTIFIER
+    database_parameter: SNOWFLAKE_DATABASE
+    warehouse_parameter: SNOWFLAKE_WAREHOUSE
+  - name: RetailDemoSnowflakeWifToken
+    type: SnowflakeWorkloadIdentityTokenProvider
+    connection_service: RetailDemoSnowflakeConnection
+    secret_parameter: SNOWFLAKE_WIF_SECRET
+    audience_parameter: AWS_WIF_AUDIENCE
+  - name: RetailDemoAwsCredentials
+    type: AWSCredentialsProviderControllerService
+    assume_role_arn_parameter: AWS_ROLE_ARN
+    assume_role_session_name_parameter: AWS_ROLE_SESSION_NAME
+    assume_role_sts_region_parameter: AWS_REGION
+    oauth2_access_token_provider: RetailDemoSnowflakeWifToken
+    static_credentials_allowed: false
+  - name: RetailDemoSchemaCache
+    type: VolatileSchemaCache
+    maximum_cache_size: 100
+  - name: RetailDemoJsonReader
+    type: JsonTreeReader
+    schema_strategy: infer-schema
+    schema_inference_cache: RetailDemoSchemaCache
+    date_format: yyyy-MM-dd
+    timestamp_format: "yyyy-MM-dd'T'HH:mm:ss"
 
 records:
   reader: JsonTreeReader
   schema_strategy: infer-schema
   parsing_strategy: strict
+  jsonl_supported: true
 
 routes:
-  - prefix: retail-demo/landing/openflow/supplier/
+  - name: supplier
+    prefix: retail-demo/landing/openflow/supplier/
+    filename: supplier.jsonl
+    route_expression: "${filename:equals('supplier.jsonl')}"
     processor: PutDatabaseRecord
     table: RETAIL_DEMO.RAW.SUPPLIER
     statement_type: INSERT
-  - prefix: retail-demo/landing/openflow/current_purchase_orders/
+    expected_rows_from_manifest: openflow/supplier/supplier.jsonl
+    business_time_fields: []
+  - name: purchase_order
+    prefix: retail-demo/landing/openflow/current_purchase_orders/
+    filename: purchase_orders.jsonl
+    route_expression: "${filename:equals('purchase_orders.jsonl')}"
     processor: PutDatabaseRecord
     table: RETAIL_DEMO.RAW.PURCHASE_ORDER
     statement_type: INSERT
-  - prefix: retail-demo/landing/openflow/current_receipts/
+    expected_rows_from_manifest: openflow/current_purchase_orders/purchase_orders.jsonl
+    business_time_fields:
+      - order_date
+      - expected_receipt_date
+      - updated_at
+  - name: receipt
+    prefix: retail-demo/landing/openflow/current_receipts/
+    filename: receipts.jsonl
+    route_expression: "${filename:equals('receipts.jsonl')}"
     processor: PutDatabaseRecord
     table: RETAIL_DEMO.RAW.RECEIPT
     statement_type: INSERT
-  - prefix: retail-demo/landing/openflow/merchant_plan/
+    expected_rows_from_manifest: openflow/current_receipts/receipts.jsonl
+    business_time_fields:
+      - receipt_date
+      - updated_at
+  - name: merchant_plan
+    prefix: retail-demo/landing/openflow/merchant_plan/
+    filename: merchant_plan.jsonl
+    route_expression: "${filename:equals('merchant_plan.jsonl')}"
     processor: PutDatabaseRecord
     table: RETAIL_DEMO.RAW.MERCHANT_PLAN
     statement_type: INSERT
+    expected_rows_from_manifest: openflow/merchant_plan/merchant_plan.jsonl
+    business_time_fields:
+      - plan_date
+      - updated_at
+
+put_database_record:
+  connection_service: RetailDemoSnowflakeConnection
+  record_reader: RetailDemoJsonReader
+  catalog: RETAIL_DEMO
+  schema: RAW
+  translate_field_names: true
+  unmatched_field_behavior: FAIL
+  unmatched_column_behavior: IGNORE
+  rollback_on_failure: true
+  autocommit: false
+
+connections:
+  prioritizer: FirstInFirstOut
+  route_unmatched_to: OpenflowFailureQueue
+  route_fetch_failure_to: OpenflowFailureQueue
+  route_database_failure_to: OpenflowFailureQueue
+  route_exhausted_retry_to: OpenflowFailureQueue
+  failure_queue:
+    preserve_original_flowfile: true
+    object_threshold: 100
+    data_size_threshold: 100 MB
+    auto_terminate: false
 
 snowflake:
   authentication_strategy: SNOWFLAKE_MANAGED
@@ -47,15 +137,31 @@ snowflake:
   unmatched_column_behavior: IGNORE
 
 failure_handling:
-  retry_relationship: retry-with-bounded-backoff
-  failure_relationship: dead-letter-queue
+  retry_relationship: retry-with-operator-observed-backoff
+  failure_relationship: bounded-failure-queue
   preserve_original_flowfile: true
   stop_gate_on_failure: true
+  require_zero_queued_failures: true
+
+idempotency:
+  mode: one-time-empty-table-load
+  require_empty_targets: true
+  list_state_prevents_normal_relisting: true
+  warning: Clearing ListS3 state or replacing source objects can duplicate rows.
 
 readiness:
   expected_files: 4
+  manifest: generated/manifest.json
   expected_tables:
     - RETAIL_DEMO.RAW.SUPPLIER
     - RETAIL_DEMO.RAW.PURCHASE_ORDER
     - RETAIL_DEMO.RAW.RECEIPT
     - RETAIL_DEMO.RAW.MERCHANT_PLAN
+  compare_rows_to_manifest: true
+  queued_failures: 0
+
+time_contract:
+  business_event_clock: TPC-DS scenario simulation_date
+  wall_clock_fields:
+    - INGESTED_AT
+  wall_clock_rule: Operational metadata only; never derive business event dates from runtime time.

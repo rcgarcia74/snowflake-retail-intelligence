@@ -18,13 +18,19 @@ lost when the runtime is removed.
 
 ## 2. Remove Openflow resources
 
-Review and run the fixed-name script:
+Confirm all processors are stopped, every queue is empty, and `SHOW OPENFLOW CONNECTORS` returns no
+unexpected connector objects. Then review both fixed-name scripts and obtain explicit approval before
+running them through their role-restricted connections:
 
 ```bash
-snow sql -c "$SNOWFLAKE_CONNECTION" -f openflow/config/99_cleanup.sql
+snow sql -c retail_demo_openflow_admin -f openflow/config/98_cleanup_objects.sql
+snow sql -c retail_demo_admin -f openflow/config/99_cleanup.sql
 ```
 
-Remove the tutorial's S3 external access integration separately only if no other runtime uses it.
+The first script performs the required Gen 2 runtime `SUSPEND → TERMINATE → DROP` lifecycle,
+terminates and drops the deployment, then removes only the fixed tutorial EAI and control database.
+The second removes the two Openflow roles through `ACCOUNTADMIN`. Neither script deletes target-table
+data or S3 objects.
 
 ## 3. Remove Snowflake objects
 

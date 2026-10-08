@@ -4,7 +4,8 @@ This document records the prerequisite setup that was actually completed and ver
 
 It is written for someone who has **not used Snowflake CLI, AWS IAM, Amazon S3, or Snowflake storage integrations before**.
 
-> **Current status:** Everything in this guide has been completed successfully except **Openflow Gen2**, which is still awaiting enablement. Openflow verification steps will be added later.
+> **Current status:** Openflow Gen2 is enabled and read-only access is verified. No Openflow roles,
+> deployment, runtime, AWS WIF trust, or ingestion flow has been created yet.
 
 ---
 
@@ -152,14 +153,15 @@ The browser/SAML authentication method originally attempted in this environment 
 
 The Snowflake CLI connections were therefore configured using **Programmatic Access Tokens**, or PATs.
 
-Two tokens are used:
+Three role-specific tokens are used after Openflow setup:
 
 ```text
 Admin/bootstrap PAT
 Engineering PAT
+Openflow administration PAT
 ```
 
-Do not put either token into the repository.
+Do not put any token into the repository.
 
 Do not put PAT values in:
 
@@ -235,6 +237,21 @@ Protect the token file:
 ```bash
 chmod 600 ~/.snowflake/pat_retail_demo
 ```
+
+---
+
+## 7A. Openflow administration PAT
+
+Openflow provisioning uses a third connection:
+
+```text
+retail_demo_openflow_admin
+```
+
+Its PAT is restricted to `OPENFLOW_ADMIN` and stored outside the repository in an absolute,
+mode-600 token file. This connection owns the Openflow control database, WIF secret, external access
+integration, deployment, and runtime lifecycle. It does not replace the `ACCOUNTADMIN` bootstrap or
+`RETAIL_DEMO_ENGINEER` connections.
 
 ---
 
@@ -1539,21 +1556,35 @@ inventory events
 
 ---
 
-# Part R — Openflow Gen2 — pending
+# Part R — Openflow Gen2 — enabled; implementation pending
 
 ## 50. Current status
 
-Openflow Gen2 is **not yet enabled** for the Snowflake account.
+On October 7, 2026, the administrative connection successfully ran the Gen 2 discovery commands:
 
-This is the only currently known prerequisite that remains unfinished.
+```sql
+SHOW OPENFLOW DEPLOYMENTS;
+SHOW OPENFLOW RUNTIMES;
+SHOW ROLES LIKE 'OPENFLOW%';
+```
 
-Do not block the rest of the demo build while waiting for Openflow.
+All three returned no rows. This proves that the account exposes the Gen 2 interfaces and that no
+tutorial Openflow objects or roles existed at the checkpoint; it does not prove creation privileges or
+runtime behavior.
+
+The same read-only checkpoint established:
+
+- `RETAIL_DEMO.RAW.SUPPLIER`, `PURCHASE_ORDER`, `RECEIPT`, and `MERCHANT_PLAN` exist with zero rows;
+- the completed `STORE_SALES_EVENTS` and `STORE_INVENTORY_EVENTS` tables each retain 3,500 rows;
+- the S3 landing prefix contains exactly the four expected Openflow JSONL objects; and
+- their byte sizes match `generated/manifest.json`: 532, 112,544, 86,030, and 30,387 bytes.
 
 ---
 
-## 51. Work that can continue without Openflow
+## 51. Work completed before Openflow mutation
 
-The following can proceed now:
+The following was completed independently and must not be reopened unless Openflow exposes a real
+dependency:
 
 ```text
 TPC-DS cohort selection
@@ -1563,27 +1594,46 @@ deterministic local fixture generation
 fixture validation
 S3 historical data upload
 Snowflake-managed Iceberg work
-Snowpipe Streaming preparation
+Snowpipe Streaming implementation and validation
 analytical SQL development
 data quality checks
 Metabase preparation
 ```
 
-Openflow will become necessary when the demo reaches the managed batch-ingestion workflow for operational feeds.
+The remaining work begins with the explicitly approved account-object and AWS trust phases in
+`openflow/README.md`.
 
 ---
 
-## 52. Intended Openflow configuration
+## 52. Verified implementation contract
 
-When Openflow becomes available, the expected cost-conscious runtime checkpoint is:
+Current Snowflake documentation and the repository contract require:
 
 ```text
 Openflow Gen2
+Deployment type: Snowflake
 Runtime size: S1
 Nodes: 1
+AWS authentication: workload identity federation
+Snowflake authentication: Snowflake Managed Token
+Flow type: custom process group, not an OPENFLOW CONNECTOR object
+Feeds: supplier, purchase order, receipt, merchant plan only
 ```
 
-Actual enablement, runtime creation, permissions, secret handling, processor configuration, execution, and verification steps must be recorded here **after they have been performed successfully**.
+The local implementation is split by both role and lifecycle so the WIF issuer and subject can be
+used to configure AWS before billable runtime creation:
+
+```text
+openflow/config/00_gen2_roles.sql
+openflow/config/01_gen2_objects.sql
+openflow/config/02_gen2_runtime.sql
+openflow/config/03_validate_load.sql
+openflow/config/98_cleanup_objects.sql
+openflow/config/99_cleanup.sql
+```
+
+Actual object creation, AWS trust, runtime creation, controller-service verification, execution, and
+load results must be recorded here only after they have been performed successfully.
 
 Do not document hypothetical Openflow steps as if they have already been verified.
 
@@ -1596,8 +1646,10 @@ Do not document hypothetical Openflow steps as if they have already been verifie
 - [x] Snowflake CLI installed and working.
 - [x] Administrative Snowflake CLI connection configured.
 - [x] Engineering Snowflake CLI connection configured.
+- [x] Openflow administration CLI connection configured.
 - [x] Programmatic Access Token authentication working.
 - [x] Engineering PAT restricted to `RETAIL_DEMO_ENGINEER`.
+- [x] Openflow administration PAT restricted to `OPENFLOW_ADMIN`.
 - [x] `RETAIL_DEMO` database created.
 - [x] `RETAIL_DEMO_WH` warehouse created.
 - [x] `RETAIL_DEMO_MONITOR` resource monitor created.
@@ -1649,14 +1701,19 @@ Do not document hypothetical Openflow steps as if they have already been verifie
 
 ---
 
-## 56. Pending prerequisite
+## 56. Openflow checkpoint
 
-- [ ] Openflow Gen2 enabled.
-- [ ] Openflow access verified.
+- [x] Openflow Gen2 enabled.
+- [x] Openflow read-only access verified.
+- [x] Four staged JSONL objects and empty target tables verified.
+- [x] Current Gen 2/WIF runbook and local configuration added.
+- [x] Openflow roles, WIF secret, EAI, and deployment created.
+- [x] Openflow deployment reached `ACTIVE` with no runtime created.
+- [ ] AWS OIDC provider and prefix-scoped read role configured.
 - [ ] Openflow S1 / one-node runtime created.
-- [ ] Openflow permissions verified.
-- [ ] Openflow ingestion flow verified.
-- [ ] Openflow setup added to this document.
+- [ ] Controller services and custom process group verified.
+- [ ] Openflow execute-as permissions verified through the running flow.
+- [ ] Openflow ingestion and read-only SQL gate verified.
 
 ---
 
@@ -1754,20 +1811,22 @@ Use imported privileges for the Snowflake sample database.
 
 ## 60. Restricted PAT cannot arbitrarily change roles
 
-The administrative bootstrap PAT was role restricted.
+The administrative bootstrap PAT was restricted to `ACCOUNTADMIN`. During the first Openflow Phase 1
+attempt, its role and grant statements succeeded, but the script stopped at:
 
-A restricted PAT session cannot necessarily execute arbitrary:
+```sql
+USE ROLE OPENFLOW_ADMIN;
+```
+
+Snowflake returned `Current session is restricted. USE ROLE not allowed.` Role-restricted PAT
+sessions also do not activate secondary roles, so granting `OPENFLOW_ADMIN` to the same user did not
+make that role available within the administrative session.
+
+The durable fix was to split the scripts by role and create a third CLI connection whose PAT is
+restricted to `OPENFLOW_ADMIN`. The Openflow-owned scripts contain no executable:
 
 ```sql
 USE ROLE ...
-```
-
-commands outside its allowed role.
-
-The bootstrap process was adjusted so the administrative connection handled administrative operations, while the engineering connection was separately used to validate:
-
-```text
-RETAIL_DEMO_ENGINEER
 ```
 
 ### Rule
@@ -1910,6 +1969,7 @@ At the completion of this prerequisite round, the environment has:
 Working Snowflake CLI authentication
 Working ACCOUNTADMIN bootstrap connection
 Working RETAIL_DEMO_ENGINEER connection
+Working OPENFLOW_ADMIN connection
 Working TPC-DS access
 RETAIL_DEMO database
 RETAIL_DEMO_WH warehouse
@@ -1928,30 +1988,34 @@ Repository development dependencies
 Passing repository hygiene checks
 Python 3.13.7
 Working Docker Desktop
+Active RETAIL_DEMO_OPENFLOW Gen 2 deployment
+Openflow WIF secret and us-east-2 S3/STS egress integration
+No Openflow runtime yet
+Empty supplier, purchase-order, receipt, and merchant-plan targets
 ```
 
-The only currently outstanding prerequisite is:
+The only currently outstanding prerequisite phase is:
 
 ```text
-Openflow Gen2
+Openflow Gen2 live implementation and ingestion verification
 ```
 
 ---
 
 # Part V — Next step
 
-The next phase that does **not** require Openflow is:
+The next phase is the AWS trust checkpoint:
 
 ```text
-TPC-DS cohort selection and qualification
+Create or reuse the Snowflake WIF OIDC provider and configure a prefix-scoped, read-only IAM role
 ```
 
 The repository guide is:
 
 ```text
-docs/03-tpcds-cohort.md
+docs/06-openflow.md
 ```
 
-The demo should continue through every independent step possible while Openflow enablement is pending.
-
-When Openflow becomes available, return to this document and add the actual verified Openflow prerequisite steps before marking the prerequisite phase completely finished.
+Use the privately captured issuer and subject from `DESC SECRET`; do not commit them. Review the exact
+AWS identity-provider, trust-policy, and S3 read-policy changes and obtain explicit approval before
+applying them. Do not create the billable Openflow runtime until the AWS trust exchange is verified.
