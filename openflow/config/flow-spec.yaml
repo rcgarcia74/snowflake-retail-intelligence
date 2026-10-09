@@ -18,9 +18,7 @@ source:
   credentials_service: RetailDemoAwsCredentials
   include_prefix_parameter: S3_PREFIX
   include_prefix: retail-demo/landing/openflow/
-  file_pattern: ".*\\.jsonl$"
   listing_strategy: tracking-timestamps
-  initial_listing_target: all-available
   primary_node_only: true
 
 controller_services:
@@ -28,7 +26,6 @@ controller_services:
     type: SnowflakeConnectionService
     authentication_strategy: SNOWFLAKE_MANAGED
     authentication_strategy_ui_label: Snowflake Managed Token
-    account_parameter: SNOWFLAKE_ACCOUNT_IDENTIFIER
     database_parameter: SNOWFLAKE_DATABASE
     warehouse_parameter: SNOWFLAKE_WAREHOUSE
   - name: RetailDemoSnowflakeWifToken
@@ -63,7 +60,7 @@ routes:
   - name: supplier
     prefix: retail-demo/landing/openflow/supplier/
     filename: supplier.jsonl
-    route_expression: "${filename:equals('supplier.jsonl')}"
+    route_expression: "${filename:endsWith('/supplier.jsonl')}"
     processor: PutDatabaseRecord
     table: RETAIL_DEMO.RAW.SUPPLIER
     statement_type: INSERT
@@ -72,7 +69,7 @@ routes:
   - name: purchase_order
     prefix: retail-demo/landing/openflow/current_purchase_orders/
     filename: purchase_orders.jsonl
-    route_expression: "${filename:equals('purchase_orders.jsonl')}"
+    route_expression: "${filename:endsWith('/purchase_orders.jsonl')}"
     processor: PutDatabaseRecord
     table: RETAIL_DEMO.RAW.PURCHASE_ORDER
     statement_type: INSERT
@@ -84,7 +81,7 @@ routes:
   - name: receipt
     prefix: retail-demo/landing/openflow/current_receipts/
     filename: receipts.jsonl
-    route_expression: "${filename:equals('receipts.jsonl')}"
+    route_expression: "${filename:endsWith('/receipts.jsonl')}"
     processor: PutDatabaseRecord
     table: RETAIL_DEMO.RAW.RECEIPT
     statement_type: INSERT
@@ -95,7 +92,7 @@ routes:
   - name: merchant_plan
     prefix: retail-demo/landing/openflow/merchant_plan/
     filename: merchant_plan.jsonl
-    route_expression: "${filename:equals('merchant_plan.jsonl')}"
+    route_expression: "${filename:endsWith('/merchant_plan.jsonl')}"
     processor: PutDatabaseRecord
     table: RETAIL_DEMO.RAW.MERCHANT_PLAN
     statement_type: INSERT
@@ -112,15 +109,20 @@ put_database_record:
   translate_field_names: true
   unmatched_field_behavior: FAIL
   unmatched_column_behavior: IGNORE
-  rollback_on_failure: true
+  rollback_on_failure: false
   autocommit: false
+  pre_processing_sql: ALTER SESSION SET CLIENT_TIMESTAMP_TYPE_MAPPING = TIMESTAMP_NTZ
 
 connections:
-  prioritizer: FirstInFirstOut
+  prioritizer: FirstInFirstOutPrioritizer
+  flowfile_expiration: 0 sec
+  load_balance_strategy: do-not-load-balance
   route_unmatched_to: OpenflowFailureQueue
   route_fetch_failure_to: OpenflowFailureQueue
-  route_database_failure_to: OpenflowFailureQueue
-  route_exhausted_retry_to: OpenflowFailureQueue
+  database_error_relationships:
+    - failure
+    - retry
+  route_database_errors_to: OpenflowFailureQueue
   failure_queue:
     preserve_original_flowfile: true
     object_threshold: 100
@@ -137,7 +139,7 @@ snowflake:
   unmatched_column_behavior: IGNORE
 
 failure_handling:
-  retry_relationship: retry-with-operator-observed-backoff
+  retry_relationship: bounded-failure-queue
   failure_relationship: bounded-failure-queue
   preserve_original_flowfile: true
   stop_gate_on_failure: true

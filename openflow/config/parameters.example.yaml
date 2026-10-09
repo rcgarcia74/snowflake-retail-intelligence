@@ -6,7 +6,6 @@ S3_PREFIX: retail-demo/landing/openflow/
 AWS_ROLE_ARN: arn:aws:iam::123456789012:role/replace-with-openflow-read-role
 AWS_ROLE_SESSION_NAME: retail-demo-openflow
 AWS_WIF_AUDIENCE: snowflake
-SNOWFLAKE_ACCOUNT_IDENTIFIER: replace-org-replace-account
 SNOWFLAKE_DATABASE: RETAIL_DEMO
 SNOWFLAKE_SCHEMA: RAW
 SNOWFLAKE_WAREHOUSE: RETAIL_DEMO_WH

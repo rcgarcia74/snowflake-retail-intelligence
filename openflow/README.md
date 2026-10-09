@@ -117,7 +117,10 @@ Attach only the S3 permissions the flow needs:
       "Resource": "arn:aws:s3:::<BUCKET>",
       "Condition": {
         "StringLike": {
-          "s3:prefix": ["retail-demo/landing/openflow/*"]
+          "s3:prefix": [
+            "retail-demo/landing/openflow",
+            "retail-demo/landing/openflow/*"
+          ]
         }
       }
     },
@@ -129,6 +132,16 @@ Attach only the S3 permissions the flow needs:
   ]
 }
 ```
+
+The AWS web-identity role wizard can generate only the `aud` trust condition. Before treating the
+role as ready, confirm that the same `StringEquals` block also contains the exact WIF `sub` and
+`sf_rnm = OPENFLOW_RETAIL_DEMO_EXECUTE_AS_RL`. Keep the existing storage-integration/Iceberg role
+separate from this Openflow-only role.
+
+Build the AWS `sub` condition from the final
+`RETAIL_DEMO_OPENFLOW_CONTROL.RUNTIME.RETAIL_DEMO_AWS_WIF` secret. Recreating or replacing a WIF
+secret changes its subject even within the same Snowflake account; a trust policy copied from a
+temporary secret will fail at runtime with `sts:AssumeRoleWithWebIdentity` HTTP 403.
 
 Snowflake documents this exchange in
 [Use Workload Identity Federation with Openflow](https://docs.snowflake.com/en/user-guide/data-integration/openflow/security/workload-identity-federation).
@@ -148,14 +161,16 @@ one minimum node, one maximum node, with `RETAIL_DEMO_OPENFLOW_S3_EAI` attached.
 ## 6. Build the custom process group
 
 Create a parameter context from `parameters.example.yaml`, replacing only the placeholders. These are
-identifiers, not credentials. Use the exact non-secret values for the bucket, AWS role ARN, Snowflake
-account identifier, and WIF secret FQN.
+identifiers, not credentials. Use the exact non-secret values for the bucket, AWS role ARN, and WIF
+secret FQN. With **Snowflake Managed Token** authentication, the current connection-service UI does
+not require a Snowflake account identifier.
 
 Create and enable these controller services:
 
 1. `RetailDemoSnowflakeConnection` (`SnowflakeConnectionService`) with **Snowflake Managed Token**.
 2. `RetailDemoSnowflakeWifToken` (`SnowflakeWorkloadIdentityTokenProvider`) referencing the connection,
-   WIF secret, and `snowflake` audience.
+   WIF secret, and `snowflake` audience. The current canvas labels this controller service **Preview**;
+   that label applies to the service, not to the Gen 2 deployment/runtime used by this tutorial.
 3. `RetailDemoAwsCredentials` (`AWSCredentialsProviderControllerService`) referencing the WIF token
    provider, read-only IAM role ARN, session name, and bucket region.
 4. `RetailDemoSchemaCache` (`VolatileSchemaCache`).
@@ -172,12 +187,39 @@ ListS3 -> FetchS3Object -> RouteOnAttribute
                                   |-> PutDatabaseRecord (PURCHASE_ORDER)
                                   |-> PutDatabaseRecord (RECEIPT)
                                   `-> PutDatabaseRecord (MERCHANT_PLAN)
+
+FetchS3Object failure -------------------------> OpenflowFailureQueue (funnel)
+RouteOnAttribute unmatched -------------------> OpenflowFailureQueue (funnel)
+Each PutDatabaseRecord failure + retry --------> OpenflowFailureQueue (funnel)
 ```
+
+Configure `ListS3` with **Tracking Timestamps**, the parameterized landing prefix, and primary-node
+execution. Do not look for an initial-listing-target field: the current processor exposes that field
+only for **Tracking Entities**, not for **Tracking Timestamps**. `ListS3` supplies the full S3 key in
+`filename` for this flow, so each `RouteOnAttribute` expression uses `endsWith('/<file>.jsonl')`
+rather than comparing `filename` to a basename.
 
 Use the exact processor properties, route expressions, controller-service bindings, FIFO connection
 prioritizer, and bounded failure queue in `flow-spec.yaml`. Never auto-terminate fetch, database,
-retry-exhaustion, or unmatched failures. A queued failure blocks readiness and must retain the
-original FlowFile for inspection.
+retry, or unmatched failures. Set every `PutDatabaseRecord` processor's **Rollback On Failure** to
+`false`; otherwise failed FlowFiles remain on the input connection and are repeatedly processed
+instead of reaching the failure funnel. Route both `failure` and `retry` to that funnel. A queued
+failure blocks readiness and retains the original FlowFile for inspection.
+
+Set every `PutDatabaseRecord` processor's **Pre-Processing SQL** to:
+
+```sql
+ALTER SESSION SET CLIENT_TIMESTAMP_TYPE_MAPPING = TIMESTAMP_NTZ
+```
+
+`JsonTreeReader` infers the source `updated_at` strings as timestamps. Without this session setting,
+the Snowflake JDBC driver interprets `setTimestamp` bindings as local-time timestamps and can shift
+the wall-clock values before writing the `TIMESTAMP_NTZ` targets.
+
+The finished group has 12 connections: six success-path connections, one unmatched route, one fetch
+failure route, and four database-writer error routes. Set every connection to `0 sec` expiration,
+100 FlowFiles, `100 MB`, no load balancing, and `FirstInFirstOutPrioritizer`. Leave the failure funnel
+without an outgoing connection so its inbound queues remain available for operator inspection.
 
 ## 7. Run once and validate
 
@@ -187,13 +229,15 @@ original FlowFile for inspection.
 4. Require zero queued failures and run the read-only gate:
 
    ```bash
-   snow sql -c retail_demo_admin -f openflow/config/03_validate_load.sql
+   snow sql -c retail_demo_openflow_admin -f openflow/config/03_validate_load.sql
    ```
 
 5. Compare all row counts with `generated/manifest.json`; the locked cohort expects 5 suppliers,
    500 purchase orders, 500 receipts, and 175 merchant-plan rows.
 6. Confirm `ORDER_DATE`, `EXPECTED_RECEIPT_DATE`, `RECEIPT_DATE`, `PLAN_DATE`, and `UPDATED_AT` remain
-   within the TPC-DS scenario window. Only `INGESTED_AT` may use the operational wall clock.
+   within the TPC-DS scenario window. Require zero timestamp-fidelity mismatches between each
+   `UPDATED_AT::DATE` and its related business date. Only `INGESTED_AT` may use the operational wall
+   clock.
 7. Suspend the runtime after capturing validation evidence:
 
    ```sql

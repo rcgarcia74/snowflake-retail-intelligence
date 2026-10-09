@@ -4,8 +4,9 @@ This document records the prerequisite setup that was actually completed and ver
 
 It is written for someone who has **not used Snowflake CLI, AWS IAM, Amazon S3, or Snowflake storage integrations before**.
 
-> **Current status:** Openflow Gen2 is enabled and read-only access is verified. No Openflow roles,
-> deployment, runtime, AWS WIF trust, or ingestion flow has been created yet.
+> **Current status:** Openflow Gen 2 deployment, S1 runtime, AWS WIF trust, controller services, and
+> the stopped custom process group are configured. Live credential exchange, ingestion, and the
+> read-only SQL gate have not run yet.
 
 ---
 
@@ -1556,7 +1557,7 @@ inventory events
 
 ---
 
-# Part R — Openflow Gen2 — enabled; implementation pending
+# Part R — Openflow Gen 2 — stopped flow configured; execution pending
 
 ## 50. Current status
 
@@ -1632,8 +1633,9 @@ openflow/config/98_cleanup_objects.sql
 openflow/config/99_cleanup.sql
 ```
 
-Actual object creation, AWS trust, runtime creation, controller-service verification, execution, and
-load results must be recorded here only after they have been performed successfully.
+The deployment, AWS trust, runtime, controller services, and stopped process-group structure have now
+been performed successfully. Execution and load results must be recorded here only after the flow
+has run and the SQL validation gate has passed.
 
 Do not document hypothetical Openflow steps as if they have already been verified.
 
@@ -1709,9 +1711,13 @@ Do not document hypothetical Openflow steps as if they have already been verifie
 - [x] Current Gen 2/WIF runbook and local configuration added.
 - [x] Openflow roles, WIF secret, EAI, and deployment created.
 - [x] Openflow deployment reached `ACTIVE` with no runtime created.
-- [ ] AWS OIDC provider and prefix-scoped read role configured.
-- [ ] Openflow S1 / one-node runtime created.
-- [ ] Controller services and custom process group verified.
+- [x] AWS OIDC provider and prefix-scoped read role configured.
+- [x] OIDC issuer, audience, subject, and execute-as-role trust conditions verified without logging values.
+- [x] IAM simulation allows Openflow-prefix list/read and denies other-prefix read, write, and delete.
+- [x] Openflow S1 / one-node runtime created and verified `ACTIVE`.
+- [x] Five controller services enabled and custom process group structurally verified.
+- [x] Seven processors, one failure funnel, and 12 bounded connections verified with zero invalid processors.
+- [x] All seven processors remain stopped; no ingestion has run.
 - [ ] Openflow execute-as permissions verified through the running flow.
 - [ ] Openflow ingestion and read-only SQL gate verified.
 
@@ -1961,6 +1967,118 @@ Do not skip the cohort, generation, ingestion, and validation gates.
 
 ---
 
+## 66. Live Openflow canvas differences
+
+The live Gen 2 canvas exposed several details that differ from earlier draft instructions:
+
+- **Snowflake Managed Token** removes the account-identifier field from
+  `SnowflakeConnectionService`; no `SNOWFLAKE_ACCOUNT_IDENTIFIER` parameter is required.
+- `SnowflakeWorkloadIdentityTokenProvider` is labeled **Preview** in the current canvas even though
+  the Gen 2 deployment/runtime used here is generally available.
+- `ListS3` with **Tracking Timestamps** does not show an initial-listing-target property. That
+  property belongs to **Tracking Entities**.
+- For the nested landing prefix, `filename` is the full S3 key used by `FetchS3Object`; route
+  expressions therefore use `endsWith('/<file>.jsonl')`.
+- `PutDatabaseRecord` must use **Rollback On Failure = false** so its `failure` and `retry`
+  relationships reach the bounded failure funnel instead of remaining on the input connection for
+  repeated processing.
+- Every `PutDatabaseRecord` needs **Pre-Processing SQL** set to
+  `ALTER SESSION SET CLIENT_TIMESTAMP_TYPE_MAPPING = TIMESTAMP_NTZ`. Otherwise NiFi's inferred
+  timestamp values are bound through JDBC using local-time semantics and can shift before reaching
+  the wall-clock `TIMESTAMP_NTZ` targets.
+- The final stopped group has seven processors, one funnel, 12 connections, and zero invalid
+  processors. Every connection uses `0 sec` expiration, 100 FlowFiles, `100 MB`, no load balancing,
+  and `FirstInFirstOutPrioritizer`.
+
+### Rule
+
+Treat a zero-invalid stopped canvas as structural validation only. It does not prove AWS STS
+exchange, Snowflake managed-token authentication, database privileges, or successful ingestion.
+
+---
+
+## 67. Diagnose AWS STS 403 condition by condition
+
+The first stopped-flow execution attempt reached AWS STS but failed before listing S3:
+
+```text
+Not authorized to perform sts:AssumeRoleWithWebIdentity (HTTP 403)
+```
+
+The earlier temporary WIF secret had been deleted, while the canvas correctly referenced the final
+`RETAIL_DEMO_OPENFLOW_CONTROL.RUNTIME.RETAIL_DEMO_AWS_WIF` secret. A private comparison confirmed
+that the final secret subject and the AWS trust policy's `sub` value were identical, disproving the
+initial stale-subject hypothesis.
+
+The remaining trust-boundary checks are the exact IAM role ARN used by the canvas, the federated
+provider ARN, the provider-path prefix on every condition key, the provider's `snowflake` client ID,
+the `aud = snowflake` condition, and the optional
+`sf_rnm = OPENFLOW_RETAIL_DEMO_EXECUTE_AS_RL` condition. Do not change the S3 permissions policy while
+STS itself rejects the web-identity role assumption.
+
+### Rule
+
+Create the final WIF secret before configuring AWS trust and compare identifiers privately. If the
+subject already matches, audit each remaining condition rather than assuming the S3 access policy is
+responsible. The Snowflake-documented baseline requires the exact provider principal, `sub`, and
+`aud`; `sf_rnm` is an optional additional restriction that can be isolated during an explicitly
+approved diagnostic. Stop the processors and suspend the runtime before editing trust or retrying.
+
+In this account, removing only the optional `sf_rnm` condition allowed the same WIF secret and exact
+`sub`/`aud` trust to complete STS and list the four S3 objects. This isolates the rejected condition
+but does not establish why the runtime token omitted or differed on that optional claim. Keep exact
+`sub` and `aud`; do not restore `sf_rnm` until the runtime claim is independently verified.
+
+---
+
+## 68. Validate timestamp fidelity, not only the scenario window
+
+The approved one-time run loaded all expected rows and reconciled every receipt:
+
+```text
+SUPPLIER         5 of 5
+PURCHASE_ORDER   500 of 500
+RECEIPT          500 of 500
+MERCHANT_PLAN    175 of 175
+PO reconciliation: 500 matched, 0 missing
+```
+
+The first scenario-clock run also exposed two independent setup gaps:
+
+- `OPENFLOW_ADMIN` needed `USAGE` on `RETAIL_DEMO.CONFIG` and `SELECT` on
+  `RETAIL_DEMO.CONFIG.DEMO_SCENARIO` to execute the clock gate through its role-restricted PAT.
+- JDBC timestamp binding shifted every source `updated_at` to the prior calendar day. Only the
+  merchant-plan check failed because its first timestamp crossed the seven-day boundary; the PO and
+  receipt shifts remained inside the window and would have escaped a range-only check.
+
+The corrected gate therefore checks both the scenario window and zero direct mismatches between
+`UPDATED_AT::DATE` and each feed's related business date. Once insert-only targets contain rows, do
+not restart the flow, clear `ListS3` state, or reload the objects. Repair deterministic timestamp
+values under explicit approval, rerun the read-only gate, and leave the processors and runtime
+stopped.
+
+After the deterministic repair, the strengthened live gate passed all four row counts, PO/receipt
+reconciliation, all seven scenario-clock checks, and all three timestamp-fidelity checks with zero
+mismatched rows. The final cost checkpoint confirmed:
+
+```text
+RETAIL_DEMO_WH       SUSPENDED, X-Small, 60-second auto-suspend
+RETAIL_DEMO_RUNTIME  SUSPENDED, one SMALL/S1 node configured
+```
+
+The explicit warehouse suspension raced with auto-suspend and returned `Invalid state`; a subsequent
+`SHOW WAREHOUSES` proved that auto-suspend had already completed. Treat that response as benign only
+after verifying `STATE = SUSPENDED` and zero running or queued work.
+
+The preventive session mapping was then applied to the live **Pre-Processing SQL** property on all
+four stopped `PutDatabaseRecord` processors and verified individually. NiFi's fixed-width processor
+editor can place **Apply** outside a narrow in-app browser pane; widen the pane before editing rather
+than leaving the runtime active while troubleshooting the layout. The final canvas remained at seven
+stopped processors, zero running, zero invalid, and `0 / 0 bytes` queued before the runtime returned
+to `SUSPENDED`.
+
+---
+
 # Part U — Current verified state
 
 At the completion of this prerequisite round, the environment has:
@@ -1990,24 +2108,28 @@ Python 3.13.7
 Working Docker Desktop
 Active RETAIL_DEMO_OPENFLOW Gen 2 deployment
 Openflow WIF secret and us-east-2 S3/STS egress integration
-No Openflow runtime yet
-Empty supplier, purchase-order, receipt, and merchant-plan targets
+AWS OIDC trust and dedicated prefix-scoped Openflow read role
+Suspended one-node SMALL/S1 Openflow runtime
+Loaded supplier, purchase-order, receipt, and merchant-plan targets with expected row counts
+Passing Openflow row-count, reconciliation, scenario-clock, and timestamp-fidelity gates
+Suspended X-Small warehouse with 60-second auto-suspend
 ```
 
-The only currently outstanding prerequisite phase is:
+The Openflow phase is complete:
 
 ```text
-Openflow Gen2 live implementation and ingestion verification
+AWS STS and S3 access verified; four feeds loaded; all SQL gates passed; live writers corrected;
+processors, warehouse, and runtime stopped
 ```
 
 ---
 
 # Part V — Next step
 
-The next phase is the AWS trust checkpoint:
+Snowpipe Streaming is already complete. Continue with the next repository phase:
 
 ```text
-Create or reuse the Snowflake WIF OIDC provider and configure a prefix-scoped, read-only IAM role
+Build and validate the eight Dynamic Tables in docs/08-dynamic-tables.md
 ```
 
 The repository guide is:
@@ -2016,6 +2138,6 @@ The repository guide is:
 docs/06-openflow.md
 ```
 
-Use the privately captured issuer and subject from `DESC SECRET`; do not commit them. Review the exact
-AWS identity-provider, trust-policy, and S3 read-policy changes and obtain explicit approval before
-applying them. Do not create the billable Openflow runtime until the AWS trust exchange is verified.
+Do not start the process group until the live effects are restated: AWS STS will exchange the WIF
+token, ListS3 will read the landing prefix, four JSONL objects will be fetched, and Snowflake inserts
+will target the four empty RAW tables. Stop the group and suspend the runtime after validation.

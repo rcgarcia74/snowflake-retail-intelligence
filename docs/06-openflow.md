@@ -40,11 +40,13 @@ below does not replace its AWS trust-policy, controller-service, failure-queue, 
 
 7. Build the custom process group from `openflow/config/flow-spec.yaml`. `JsonTreeReader` is a
    controller service shared by the four `PutDatabaseRecord` processors, not a processor in the flow.
+   Apply the contract's `CLIENT_TIMESTAMP_TYPE_MAPPING = TIMESTAMP_NTZ` pre-processing SQL to every
+   writer so JDBC preserves the source wall-clock timestamps.
 8. Start the process group once. Require zero queued failures and exact row counts matching
    `generated/manifest.json`, then run:
 
    ```bash
-   snow sql -c retail_demo_admin -f openflow/config/03_validate_load.sql
+   snow sql -c retail_demo_openflow_admin -f openflow/config/03_validate_load.sql
    ```
 
 9. Stop the process group and suspend the runtime after evidence capture. Active runtimes consume

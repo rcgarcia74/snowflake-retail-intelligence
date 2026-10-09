@@ -30,6 +30,9 @@ def test_openflow_sql_supports_role_restricted_pat_connections() -> None:
     runtime = (ROOT / "openflow/config/02_gen2_runtime.sql").read_text(
         encoding="utf-8"
     )
+    validation = (ROOT / "openflow/config/03_validate_load.sql").read_text(
+        encoding="utf-8"
+    )
     object_cleanup = (ROOT / "openflow/config/98_cleanup_objects.sql").read_text(
         encoding="utf-8"
     )
@@ -39,10 +42,26 @@ def test_openflow_sql_supports_role_restricted_pat_connections() -> None:
 
     assert "USE ROLE ACCOUNTADMIN" in bootstrap
     assert "CREATE ROLE IF NOT EXISTS OPENFLOW_ADMIN" in bootstrap
+    assert (
+        "GRANT USAGE ON SCHEMA RETAIL_DEMO.CONFIG TO ROLE OPENFLOW_ADMIN"
+        in bootstrap
+    )
+    assert (
+        "GRANT SELECT ON TABLE RETAIL_DEMO.CONFIG.DEMO_SCENARIO\n"
+        "  TO ROLE OPENFLOW_ADMIN"
+        in bootstrap
+    )
     assert not any(
         line.strip().startswith("USE ROLE") for line in objects.splitlines()
     )
     assert "CREATE ROLE IF NOT EXISTS" not in objects
+    assert "'timestamp-fidelity-' || FEED" in validation
+    assert "'purchase-order' AS FEED" in validation
+    assert "'receipt'," in validation
+    assert "'merchant-plan'," in validation
+    assert "UPDATED_AT::DATE <> EXPECTED_RECEIPT_DATE" in validation
+    assert "UPDATED_AT::DATE <> RECEIPT_DATE" in validation
+    assert "UPDATED_AT::DATE <> PLAN_DATE" in validation
     assert not any(
         line.strip().startswith("USE ROLE") for line in runtime.splitlines()
     )
@@ -72,7 +91,7 @@ def test_openflow_contract_owns_only_staged_operational_feeds() -> None:
         "note": "Custom canvas flows are not schema-level gen 2 OPENFLOW CONNECTOR objects.",
     }
     assert contract["source"]["listing_strategy"] == "tracking-timestamps"
-    assert contract["source"]["initial_listing_target"] == "all-available"
+    assert "initial_listing_target" not in contract["source"]
     assert routes == EXPECTED_ROUTES
     assert all(route["statement_type"] == "INSERT" for route in contract["routes"])
     assert {route["filename"] for route in contract["routes"]} == {
@@ -89,10 +108,35 @@ def test_openflow_contract_owns_only_staged_operational_feeds() -> None:
         "JsonTreeReader",
     } <= services.keys()
     aws_credentials = services["AWSCredentialsProviderControllerService"]
+    snowflake_connection = services["SnowflakeConnectionService"]
     assert aws_credentials["static_credentials_allowed"] is False
+    assert "account_parameter" not in snowflake_connection
     assert parameters["SNOWFLAKE_AUTHENTICATION_STRATEGY"] == "SNOWFLAKE_MANAGED"
+    assert "SNOWFLAKE_ACCOUNT_IDENTIFIER" not in parameters
     assert "AWS_ACCESS_KEY_ID" not in parameters
     assert "AWS_SECRET_ACCESS_KEY" not in parameters
+    assert {route["name"]: route["route_expression"] for route in contract["routes"]} == {
+        "supplier": "${filename:endsWith('/supplier.jsonl')}",
+        "purchase_order": "${filename:endsWith('/purchase_orders.jsonl')}",
+        "receipt": "${filename:endsWith('/receipts.jsonl')}",
+        "merchant_plan": "${filename:endsWith('/merchant_plan.jsonl')}",
+    }
+    assert contract["put_database_record"]["rollback_on_failure"] is False
+    assert contract["put_database_record"]["pre_processing_sql"] == (
+        "ALTER SESSION SET CLIENT_TIMESTAMP_TYPE_MAPPING = TIMESTAMP_NTZ"
+    )
+    assert contract["connections"]["database_error_relationships"] == [
+        "failure",
+        "retry",
+    ]
+    assert contract["connections"]["prioritizer"] == "FirstInFirstOutPrioritizer"
+    assert contract["connections"]["flowfile_expiration"] == "0 sec"
+    assert contract["connections"]["failure_queue"] == {
+        "preserve_original_flowfile": True,
+        "object_threshold": 100,
+        "data_size_threshold": "100 MB",
+        "auto_terminate": False,
+    }
     assert contract["idempotency"]["require_empty_targets"] is True
     assert contract["readiness"]["queued_failures"] == 0
     assert contract["time_contract"]["business_event_clock"] == (
