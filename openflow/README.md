@@ -41,6 +41,19 @@ retail-demo/landing/openflow/merchant_plan/merchant_plan.jsonl
 Compare object sizes and row counts to `generated/manifest.json`. Do not continue if the target tables
 contain rows or if the staged files differ from the validated local files.
 
+### Verification gate
+
+- Confirm that each of the four local JSONL row counts and object sizes matches
+  `generated/manifest.json`.
+- In S3, confirm that the landing prefix contains exactly the four keys listed above and that each
+  object's size matches the manifest. `aws s3 ls s3://<BUCKET>/retail-demo/landing/openflow/ --recursive`
+  is a read-only way to collect that evidence when AWS CLI access is available.
+- Query the four target tables and require a count of `0` for every table. Use the existing
+  `retail_demo` connection; the query may briefly resume `RETAIL_DEMO_WH`, which should return to
+  `SUSPENDED` through its 60-second auto-suspend setting.
+- **Pass:** four matching files, four matching manifest entries, and four empty target tables.
+  **Stop:** any missing/extra file, size or row-count mismatch, or nonempty target table.
+
 ## 2. Bootstrap the Openflow roles
 
 Run only the role bootstrap through the administrative connection and only after approval:
@@ -67,6 +80,26 @@ Store the returned value outside the repository in a mode-600 file, and configur
 `retail_demo_openflow_admin` Snowflake CLI connection with an absolute `token_file_path` and
 `role = "OPENFLOW_ADMIN"`. Never print or commit the token.
 
+### Verification gate
+
+Run these read-only checks without printing the PAT:
+
+```bash
+snow connection test -c retail_demo_openflow_admin
+snow sql -c retail_demo_openflow_admin -q "SELECT CURRENT_ROLE() AS CURRENT_ROLE"
+snow sql -c retail_demo_admin -q "
+  SHOW GRANTS TO ROLE OPENFLOW_ADMIN;
+  SHOW GRANTS TO ROLE OPENFLOW_RETAIL_DEMO_EXECUTE_AS_RL;
+"
+```
+
+- **Pass:** the connection test succeeds, `CURRENT_ROLE()` returns `OPENFLOW_ADMIN`, and the grants
+  match `00_gen2_roles.sql`. The execute-as role has database/schema usage, warehouse usage/operate,
+  and insert/select on only the four target tables; it has no broader data access.
+- **Stop:** the PAT is unrestricted, the session role is not `OPENFLOW_ADMIN`, the runtime role has
+  broader data access, or the token value appears in terminal output, shell history, or the repository.
+- **Cost state:** no Openflow runtime exists yet, so this phase starts no Openflow compute.
+
 ## 3. Create the control objects and WIF trust anchor
 
 Run phase 1 through the role-restricted Openflow connection:
@@ -81,6 +114,26 @@ The script creates the control database/schema, WIF secret, exact S3/STS network
 access integration, and Gen 2 deployment. It does not create a runtime. Save the
 `workload_identity_federation_issuer` and `workload_identity_federation_subject` returned by
 `DESC SECRET` in private deployment notes; do not commit account-specific values.
+
+### Verification gate
+
+The phase script is itself the gate: `SYSTEM$WAIT_FOR_OPENFLOW_DEPLOYMENT_STATUS` must return `TRUE`,
+`DESC SECRET` must return nonempty issuer and subject values, and `DESC OPENFLOW DEPLOYMENT` must show
+`RETAIL_DEMO_OPENFLOW` as active. Recheck the two descriptors without exposing the values publicly:
+
+```bash
+snow sql -c retail_demo_openflow_admin -q "
+  DESC SECRET RETAIL_DEMO_OPENFLOW_CONTROL.RUNTIME.RETAIL_DEMO_AWS_WIF;
+  DESC OPENFLOW DEPLOYMENT RETAIL_DEMO_OPENFLOW;
+"
+```
+
+- **Pass:** active deployment, one final WIF secret, and nonempty issuer and subject from that same
+  secret.
+- **Stop:** the wait returns `FALSE`, either WIF field is absent, or a temporary/replaced secret was
+  used to build AWS trust.
+- **Cost state:** the deployment exists, but no runtime has been created and no Openflow compute is
+  running.
 
 ## 4. Configure AWS workload identity
 
@@ -146,6 +199,28 @@ temporary secret will fail at runtime with `sts:AssumeRoleWithWebIdentity` HTTP 
 Snowflake documents this exchange in
 [Use Workload Identity Federation with Openflow](https://docs.snowflake.com/en/user-guide/data-integration/openflow/security/workload-identity-federation).
 
+### Verification gate
+
+Use the AWS console or these read-only CLI calls; replace only the placeholders and do not record
+credentials:
+
+```bash
+aws iam get-open-id-connect-provider \
+  --open-id-connect-provider-arn <AWS_OIDC_PROVIDER_ARN>
+aws iam get-role --role-name SnowflakeRetailDemoOpenflowRole
+aws iam list-attached-role-policies --role-name SnowflakeRetailDemoOpenflowRole
+```
+
+- **Pass:** the provider audience contains `snowflake`; `Principal.Federated` is the exact provider
+  ARN; the `sub`, `aud`, and `sf_rnm` condition-key prefixes exactly match its host/path; their values
+  are the final WIF subject, `snowflake`, and `OPENFLOW_RETAIL_DEMO_EXECUTE_AS_RL`; and the attached
+  policy permits only `ListBucket` on the landing prefix and `GetObject` beneath it.
+- **Stop:** any trust condition is missing, a condition uses a different provider path, the subject
+  came from a replaced secret, or the S3 policy permits write/delete or a broader bucket scope.
+- Controller-service verification does not prove the AWS exchange. The first `ListS3` execution is
+  the end-to-end STS test; an HTTP 403 there blocks ingestion.
+- **Cost state:** no runtime has been created, so this phase starts no Openflow compute.
+
 ## 5. Create the runtime
 
 After the AWS OIDC provider, trust conditions, and read policy are verified, run phase 2 only after
@@ -157,6 +232,28 @@ snow sql -c retail_demo_openflow_admin -f openflow/config/02_gen2_runtime.sql
 
 The expected runtime is `RETAIL_DEMO_OPENFLOW_CONTROL.RUNTIME.RETAIL_DEMO_RUNTIME`, `SMALL`/`S1`,
 one minimum node, one maximum node, with `RETAIL_DEMO_OPENFLOW_S3_EAI` attached.
+
+### Verification gate
+
+`SYSTEM$WAIT_FOR_OPENFLOW_RUNTIME_STATUS` in the phase script must return `TRUE`. Its following
+`DESC OPENFLOW RUNTIME` output must show the expected deployment, node type/tier, one-node limits,
+execute-as role, and external access integration.
+
+- **Pass:** the runtime reaches `ACTIVE` with exactly the configuration above and the runtime canvas
+  opens for the non-`ACCOUNTADMIN` user.
+- **Stop:** the wait returns `FALSE`, the canvas returns unauthorized, or any runtime property differs.
+- **Cost state:** `ACTIVE` S1 runtime compute is billable even while canvas processors are stopped.
+  If canvas configuration will not continue immediately, suspend and verify it:
+
+  ```sql
+  ALTER OPENFLOW RUNTIME
+    RETAIL_DEMO_OPENFLOW_CONTROL.RUNTIME.RETAIL_DEMO_RUNTIME SUSPEND;
+  SELECT SYSTEM$WAIT_FOR_OPENFLOW_RUNTIME_STATUS(
+    600,
+    'SUSPENDED',
+    'RETAIL_DEMO_OPENFLOW_CONTROL.RUNTIME.RETAIL_DEMO_RUNTIME'
+  );
+  ```
 
 ## 6. Build the custom process group
 
@@ -221,6 +318,20 @@ failure route, and four database-writer error routes. Set every connection to `0
 100 FlowFiles, `100 MB`, no load balancing, and `FirstInFirstOutPrioritizer`. Leave the failure funnel
 without an outgoing connection so its inbound queues remain available for operator inspection.
 
+### Verification gate
+
+Before starting the group, inspect the canvas and controller-service screens.
+
+- **Pass:** five controller services are enabled and valid; seven processors are valid and stopped;
+  all 12 connections exist with the contract settings; every writer has the timestamp pre-processing
+  SQL and routes `failure` plus `retry` to the failure funnel; and every queue contains `0` FlowFiles
+  and `0 bytes`.
+- **Stop:** any component is invalid, a controller-service verification fails, a relationship is
+  auto-terminated contrary to the contract, a parameter still contains a placeholder, or a queue is
+  nonempty before the first run.
+- **Cost state:** stopped processors do not stop runtime billing. Suspend the runtime if the run will
+  not begin immediately, then resume it only for the validation run.
+
 ## 7. Run once and validate
 
 1. Reconfirm all four target tables are empty.
@@ -249,6 +360,24 @@ without an outgoing connection so its inbound queues remain available for operat
      'RETAIL_DEMO_OPENFLOW_CONTROL.RUNTIME.RETAIL_DEMO_RUNTIME'
    );
    ```
+
+### Verification gate
+
+- **Pass:** the canvas shows seven stopped processors, zero queued failures, and all 12 connection
+  queues at `0 FlowFiles / 0 bytes`; `03_validate_load.sql` returns 15 rows and every row has
+  `STATUS = 'PASS'`; the counts are 5 suppliers, 500 purchase orders, 500 receipts, and 175
+  merchant-plan rows; PO/receipt reconciliation reports 500 matched and 0 missing; all scenario-clock
+  and timestamp-fidelity checks pass; and the runtime wait returns `TRUE` for `SUSPENDED`.
+- **Stop:** any SQL row reports `FAIL`, any bulletin or failure queue remains, counts differ from the
+  manifest, or the runtime does not reach `SUSPENDED`.
+- Confirm the validation warehouse also returns to its non-billable state:
+
+  ```bash
+  snow sql -c retail_demo_admin -q "SHOW WAREHOUSES LIKE 'RETAIL_DEMO_WH'"
+  ```
+
+  Require `state = SUSPENDED`, `running = 0`, `queued = 0`, size `X-Small`, and
+  `auto_suspend = 60`. Persistent Snowflake tables and S3 objects can still incur storage charges.
 
 ## Reproducibility boundary
 
