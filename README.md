@@ -2,8 +2,8 @@
 
 Build a retailer-neutral, item–store–day decision product that answers:
 
-> Which merchandising problems need attention, why are they happening, and what is the sales and
-> margin exposure?
+> Which merchandising problems need attention, why are they happening, and how much sales and
+> positive margin are at risk, with signed margin impact retained as evidence?
 
 TPC-DS supplies governed retail history at scale. A deterministic local Python generator fills the
 operational gaps—inventory, suppliers, purchase orders, receipts, plans, and events—without using

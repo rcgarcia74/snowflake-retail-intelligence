@@ -8,7 +8,7 @@ files together. Confirm each fixed target before running its step.
 Stop Openflow processors, suspend the tutorial runtime, stop Metabase, and suspend the warehouse.
 
 ```bash
-docker compose -f metabase/docker-compose.yml down
+docker compose --env-file .env -f metabase/docker-compose.yml down
 snow sql -c "$SNOWFLAKE_CONNECTION" -q \
   'ALTER WAREHOUSE IF EXISTS RETAIL_DEMO_WH SUSPEND;'
 ```

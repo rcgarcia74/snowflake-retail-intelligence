@@ -79,6 +79,18 @@ Require these initial row counts: `ITEM_STORE_BASELINE` 500, `ITEM_STORE_DAY` 3,
 `SUPPLIER_PERFORMANCE_CURRENT` 500, `ITEM_STORE_HEALTH` 500, `CATEGORY_STORE_DAY` 175,
 `MERCHANT_SCORECARD` 1, `MERCHANT_PROBLEMS` 24, and `ROOT_CAUSE_EVIDENCE` 24.
 
+### Updating an existing definition
+
+Prefer `CREATE OR ALTER DYNAMIC TABLE` for compatible definition changes. Snowflake can add columns
+with that command only at the end of the existing column order; it cannot insert or reorder columns.
+If a versioned definition adds a column in the middle, use an atomic `CREATE OR REPLACE DYNAMIC TABLE`
+for the affected leaf table, expect a full reinitialization, then recreate its dependent secure view
+and restore that view's grants. Do not replace unaffected upstream Dynamic Tables.
+
+After either path, repeat the metadata, refresh-history, row-count, readiness, and shutdown gates in
+this chapter. Snowflake documents the supported changes and reinitialization behavior in
+[Modify dynamic tables](https://docs.snowflake.com/en/user-guide/dynamic-tables/modify).
+
 ### After serving and readiness validation
 
 Run the secure-view script and then:
@@ -95,9 +107,24 @@ Require every readiness row to be `PASS` and `ASSERT_DEMO_READY()` to return
 ### Shutdown
 
 After evidence capture, suspend all eight Dynamic Tables so their schedulers cannot request refresh
-compute, then suspend the warehouse. Verify every Dynamic Table reports `SUSPENDED`, and verify
-`RETAIL_DEMO_WH` reports `SUSPENDED`, X-Small, 60-second auto-suspend, 0 running, and 0 queued.
-Suspension preserves the tables and views; it does not remove persistent Snowflake or S3 storage.
+compute, then suspend the warehouse. Use a connection restricted to `RETAIL_DEMO_ENGINEER`, the
+Dynamic Table owner role, for the role-scoped state function:
+
+```sql
+SELECT
+  NAME,
+  SCHEDULING_STATE:state::STRING AS STATE,
+  SCHEDULING_STATE:reason_code::STRING AS REASON_CODE
+FROM TABLE(RETAIL_DEMO.INFORMATION_SCHEMA.DYNAMIC_TABLES())
+ORDER BY NAME;
+```
+
+Require eight `SUSPENDED` rows. `USER_SUSPENDED` and `UPSTREAM_USER_SUSPENDED` are the expected
+reason codes for this pipeline. An `ACCOUNTADMIN` connection restricted to that primary role can
+return no rows from this function because the metadata is role-scoped; do not treat an empty result
+as proof of suspension. Separately verify `RETAIL_DEMO_WH` reports `SUSPENDED`, X-Small, 60-second
+auto-suspend, 0 running, and 0 queued. Suspension preserves the tables and views; it does not remove
+persistent Snowflake or S3 storage.
 
 Ask CoCo to inspect refresh history and query profiles, not to change risk thresholds casually:
 
