@@ -386,6 +386,10 @@ registry is supported, but a runtime export can contain environment identifiers 
 properties. Add a sanitized versioned export only after inspecting it for secrets and account data.
 Until then, do not claim that the custom canvas flow is automatically deployed from this repository.
 
+After a successful one-time load, follow the private-bundle creation and replay-safe restoration
+procedure in [RECOVERY.md](RECOVERY.md). A restored flow must remain stopped when the target tables
+already contain the validated rows.
+
 Processor and controller-service behavior is documented in Snowflake's
 [processor reference](https://docs.snowflake.com/en/user-guide/data-integration/openflow/processors/index),
 [controller-service reference](https://docs.snowflake.com/en/user-guide/data-integration/openflow/controllers),

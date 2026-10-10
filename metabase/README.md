@@ -54,9 +54,10 @@ maintenance commands because this Compose layout stores the H2 database at the n
 above. Keep the backup until Metabase starts successfully; it contains local application state and
 must not be committed.
 
-Open `http://localhost:3000`, add Snowflake, and use a dedicated `TYPE=SERVICE` user authenticated
-with an RSA private key stored outside the repository. Grant the user only `RETAIL_DEMO_METABASE`,
-set `DEFAULT_SECONDARY_ROLES = ()`, and configure the connection with:
+Open `http://localhost:3000`, add Snowflake, and use the dedicated `TYPE=SERVICE` user created by
+the bootstrap command in `docs/02-snowflake-setup.md`. That command registers the RSA public key,
+grants only `RETAIL_DEMO_METABASE`, and sets `DEFAULT_SECONDARY_ROLES = ()`. Configure the
+connection with the matching private key stored outside the repository and these values:
 
 - the Snowflake account identifier, such as `<organization>-<account>`, without the
   `.snowflakecomputing.com` suffix;

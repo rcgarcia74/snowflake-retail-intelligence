@@ -12,10 +12,12 @@ set +a
 printf 'S3_BUCKET=%s\nS3_ROOT=%s\nSNOWFLAKE_CONNECTION=%s\n' \
   "$S3_BUCKET" "$S3_ROOT" "$SNOWFLAKE_CONNECTION"
 
-test "$S3_BUCKET" = "snowflake-retail-demo-rommelg" || {
-  echo "ERROR: unexpected S3_BUCKET: $S3_BUCKET"
-  exit 1
-}
+case "$S3_BUCKET" in
+  ""|replace-with-your-bucket)
+    echo "ERROR: set S3_BUCKET to the existing bucket dedicated to this tutorial"
+    exit 1
+    ;;
+esac
 
 test "$S3_ROOT" = "retail-demo" || {
   echo "ERROR: unexpected S3_ROOT: $S3_ROOT"
@@ -31,12 +33,14 @@ test "$SNOWFLAKE_CONNECTION" = "retail_demo" || {
 Expected:
 
 ```text
-S3_BUCKET=snowflake-retail-demo-rommelg
+S3_BUCKET=<your-existing-bucket>
 S3_ROOT=retail-demo
 SNOWFLAKE_CONNECTION=retail_demo
 ```
 
-Do not continue if any value differs.
+The bucket value must be your intended existing bucket; the root and connection values must match
+the fixed values above. Do not continue while any value is blank or still contains an example
+placeholder.
 
 ## 1. Upload only validated files
 

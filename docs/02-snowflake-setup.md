@@ -5,21 +5,43 @@ execute only trusted repository files.
 
 ## 1. Bootstrap the workspace
 
+Generate a dedicated unencrypted PKCS #8 key pair for the Metabase service user. The private key
+stays outside the repository and is never passed to Snowflake:
+
 ```bash
-snow sql -c "$SNOWFLAKE_CONNECTION" \
+mkdir -p "$HOME/.snowflake/keys"
+umask 077
+openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -outform PEM \
+  -out "$HOME/.snowflake/keys/retail_demo_metabase.p8" -nocrypt
+openssl pkey -in "$HOME/.snowflake/keys/retail_demo_metabase.p8" -pubout \
+  -out "$HOME/.snowflake/keys/retail_demo_metabase.pub"
+chmod 600 "$HOME/.snowflake/keys/retail_demo_metabase.p8"
+METABASE_RSA_PUBLIC_KEY="$(sed -e '1d' -e '$d' \
+  "$HOME/.snowflake/keys/retail_demo_metabase.pub" | tr -d '\n')"
+test -n "$METABASE_RSA_PUBLIC_KEY"
+```
+
+The final test must succeed. The shell variable contains only the public key; do not print the
+private key or commit either file.
+
+```bash
+snow sql -c retail_demo_admin \
   -f sql/00_setup/00_bootstrap.sql \
   -D "user_name=YOUR_ENGINEERING_USER" \
-  -D "metabase_user_name=YOUR_METABASE_USER"
+  -D "metabase_user_name=RETAIL_DEMO_METABASE_USER" \
+  -D "metabase_rsa_public_key=$METABASE_RSA_PUBLIC_KEY"
 ```
 
 The script creates an X-Small, 60-second auto-suspend warehouse, a 25-credit resource monitor,
-`RETAIL_DEMO`, seven schemas, an engineering role, and a read-only BI role. If users are provisioned
-by identity automation, replace the two user grants with your normal role-assignment process.
+`RETAIL_DEMO`, seven schemas, an engineering role, a read-only BI role, and a dedicated key-pair
+`TYPE=SERVICE` user for Metabase. The engineering user must already exist. If users are provisioned
+by identity automation, replace the user creation and role grants with your normal process while
+preserving the dedicated-user and least-privilege boundaries.
 
 ## 2. Create the S3 integrations
 
 ```bash
-snow sql -c "$SNOWFLAKE_CONNECTION" \
+snow sql -c retail_demo_admin \
   -f sql/00_setup/01_storage_integrations.sql \
   -D "aws_role_arn=$AWS_ICEBERG_ROLE_ARN" \
   -D "s3_landing_url=s3://$S3_BUCKET/$S3_ROOT/landing/" \
@@ -59,7 +81,7 @@ list, delete, and AWS-role validation checks pass.
 Then create and test the landing stage:
 
 ```bash
-snow sql -c "$SNOWFLAKE_CONNECTION" \
+snow sql -c retail_demo \
   -f sql/00_setup/02_stage_objects.sql \
   -D "s3_landing_url=s3://$S3_BUCKET/$S3_ROOT/landing/"
 ```
@@ -70,7 +92,7 @@ throwaway path if your administrator permits `SYSTEM$VALIDATE_STORAGE_INTEGRATIO
 ## 3. Create native raw tables
 
 ```bash
-snow sql -c "$SNOWFLAKE_CONNECTION" -f sql/02_raw/01_raw_tables.sql
+snow sql -c retail_demo -f sql/02_raw/01_raw_tables.sql
 ```
 
 Do not create Dynamic Tables yet. Their first initialization should happen only after source

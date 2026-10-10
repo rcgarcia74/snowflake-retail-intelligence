@@ -26,27 +26,45 @@ The cost-safe build state is:
 - `RETAIL_DEMO_WH` is suspended with `AUTO_RESUME = FALSE`; and
 - Metabase may remain local, but it cannot restart Snowflake compute automatically.
 
-Restore Openflow only for a scheduled live rehearsal or audience demonstration. Use the documented
-role-restricted provisioning sequence in [06 — Ingest staged feeds with Openflow](06-openflow.md),
-then import the private custom-flow export, recreate the parameter context from the private inventory,
-verify every controller-service property before enabling it, and leave all processors stopped until
-the rehearsal begins. Restoration is a stop condition unless the deployment and S1/one-node runtime
-match the documented fixed names and the imported flow has zero queued FlowFiles.
+Restore Openflow only for a scheduled live rehearsal or audience demonstration. Follow the exact
+[recovery runbook](../openflow/RECOVERY.md): recreate and revalidate the deployment/runtime, import
+the private export, recreate the parameter context from the private inventory, verify every
+controller-service property, and leave the process group stopped. Restoration is a stop condition
+unless the deployment and S1/one-node runtime match the documented fixed names and the imported flow
+has zero queued FlowFiles.
 
 After the rehearsal, stop the processors, require empty queues, export any newly approved changes,
 and return to the cost-safe build state. Do not delete the already loaded source rows merely to prove
 that the flow can be restored.
+
+## First build versus repeat rehearsal
+
+The build run is the only run that starts the Openflow process group and commits the final two
+Snowpipe Streaming dates. It requires empty Openflow targets, an uncommitted streaming tail, and all
+source-file/manifest gates to pass.
+
+For every repeat rehearsal or audience demonstration:
+
+1. Do not start the restored Openflow group; show the valid stopped canvas, empty queues, exported
+   flow checksum, and passing load-validation evidence instead.
+2. Do not rerun the streaming producer. Show the committed offsets and use the existing final state.
+3. Resume `RETAIL_DEMO_WH` explicitly only for a validation or Dynamic Table refresh step. Confirm
+   refresh success, then suspend it again; never rely on automatic resume.
+4. Run the final readiness assertion only after the Dynamic Tables are ready, then return every
+   billable resource to the cost-safe state.
 
 ## Storyboard
 
 1. **Business question:** Which problems need merchant attention now, why, and for how much?
 2. **Foundation:** show that item/store identities and demand come from TPC-DS.
 3. **Open history:** show one Iceberg table and its S3-backed metadata location.
-4. **Operational integration:** show completed Openflow processors and zero failures from the live
-   restored runtime. If Openflow was intentionally not restored, show the preserved flow export,
-   checksum evidence, and Snowflake load-verification results and label this as recorded evidence.
+4. **Operational integration:** show the restored stopped Openflow process group, zero queued
+   failures, and preserved Snowflake load-verification results. Do not start it when the four target
+   tables are already populated. If Openflow was intentionally not restored, show the preserved flow
+   export and checksum evidence and label it as recorded evidence.
 5. **Healthy state:** scorecard has healthy controls and no intended supplier-underfill problem.
-6. **Change:** run the streaming producer without `--through-date` to commit the last two days.
+6. **Change:** on the first build only, run the streaming producer without `--through-date` to commit
+   the last two days. On repeat demonstrations, show the already committed offsets instead.
 7. **Freshness:** show channel offsets and Dynamic Table refresh status.
 8. **Decision:** refresh Metabase; drill category → store → item.
 9. **Evidence:** sustained demand, partial receipt, declining days of supply, positive exposure.

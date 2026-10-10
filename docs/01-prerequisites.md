@@ -46,6 +46,29 @@ python scripts/check_repo.py
 Populate only public identifiers in `.env`. Configure authentication in the Snowflake CLI connection,
 AWS profile/workload identity, Openflow secret reference, and the ignored streaming profile.
 
+## Snowflake CLI connection contract
+
+Keep credentials and token-file paths in the Snowflake CLI configuration outside the repository. This
+tutorial expects these named connections:
+
+| Connection | Required role | When it is used |
+| --- | --- | --- |
+| `retail_demo_admin` | `ACCOUNTADMIN` | workspace bootstrap, storage integrations, role lifecycle |
+| `retail_demo` | `RETAIL_DEMO_ENGINEER` | cohort, raw tables, Iceberg, streaming, Dynamic Tables, validation |
+| `retail_demo_openflow_admin` | `OPENFLOW_ADMIN` | created later by the Openflow runbook; deployment/runtime lifecycle only |
+
+Before bootstrap, verify only the administrative connection:
+
+```bash
+snow connection test -c retail_demo_admin
+snow sql -c retail_demo_admin -q "SELECT CURRENT_ROLE() AS CURRENT_ROLE;"
+```
+
+Require `CURRENT_ROLE()` to be `ACCOUNTADMIN`. After [Snowflake setup](02-snowflake-setup.md),
+configure and verify `retail_demo` with role `RETAIL_DEMO_ENGINEER`. The Openflow runbook creates and
+verifies the third connection after its least-privilege role exists. Do not use an administrative
+connection for normal engineering commands.
+
 ## Availability and spend checkpoint
 
 Before creating billable objects, confirm:

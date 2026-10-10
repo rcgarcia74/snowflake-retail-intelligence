@@ -19,18 +19,59 @@ lost when the runtime is removed.
 ## 2. Remove Openflow resources
 
 Confirm all processors are stopped, every queue is empty, and `SHOW OPENFLOW CONNECTORS` returns no
-unexpected connector objects. Then review both fixed-name scripts and obtain explicit approval before
-running them through their role-restricted connections:
+unexpected connector objects. First inventory the fixed objects; this is read-only:
+
+```bash
+snow sql -c retail_demo_openflow_admin -q "
+  SHOW OPENFLOW DEPLOYMENTS LIKE 'RETAIL_DEMO_OPENFLOW';
+  SHOW OPENFLOW RUNTIMES LIKE 'RETAIL_DEMO_RUNTIME'
+    IN SCHEMA RETAIL_DEMO_OPENFLOW_CONTROL.RUNTIME;
+"
+```
+
+Then obtain explicit approval and use exactly one matching branch:
+
+### Runtime exists
+
+Run the full lifecycle script only when the runtime is present:
 
 ```bash
 snow sql -c retail_demo_openflow_admin -f openflow/config/98_cleanup_objects.sql
+```
+
+### Deployment exists but runtime is absent
+
+```bash
+snow sql -c retail_demo_openflow_admin -q "
+  ALTER OPENFLOW DEPLOYMENT RETAIL_DEMO_OPENFLOW TERMINATE;
+  SELECT SYSTEM\$WAIT_FOR_STABLE_OPENFLOW_DEPLOYMENTS(900, 'RETAIL_DEMO_OPENFLOW');
+  DROP OPENFLOW DEPLOYMENT RETAIL_DEMO_OPENFLOW;
+  DROP EXTERNAL ACCESS INTEGRATION IF EXISTS RETAIL_DEMO_OPENFLOW_S3_EAI;
+  DROP DATABASE IF EXISTS RETAIL_DEMO_OPENFLOW_CONTROL;
+"
+```
+
+### Runtime and deployment are both absent
+
+```bash
+snow sql -c retail_demo_openflow_admin -q "
+  DROP EXTERNAL ACCESS INTEGRATION IF EXISTS RETAIL_DEMO_OPENFLOW_S3_EAI;
+  DROP DATABASE IF EXISTS RETAIL_DEMO_OPENFLOW_CONTROL;
+"
+```
+
+After the selected branch succeeds, remove the two Openflow roles only if the tutorial will not be
+restored:
+
+```bash
 snow sql -c retail_demo_admin -f openflow/config/99_cleanup.sql
 ```
 
-The first script performs the required Gen 2 runtime `SUSPEND → TERMINATE → DROP` lifecycle,
-terminates and drops the deployment, then removes only the fixed tutorial EAI and control database.
-The second removes the two Openflow roles through `ACCOUNTADMIN`. Neither script deletes target-table
-data or S3 objects.
+The runtime-present branch performs the required Gen 2 runtime `SUSPEND → TERMINATE → DROP`
+lifecycle before removing the deployment, EAI, and control database. The deployment-only branch
+omits that impossible runtime lifecycle; the absent branch removes only retained control objects.
+The final role script uses `ACCOUNTADMIN`. None of these branches delete target-table data or S3
+objects.
 
 ## 3. Remove Snowflake objects
 

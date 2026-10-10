@@ -7,6 +7,10 @@ This is a custom process group on a Gen 2 Snowflake deployment/runtime, not a sc
 `OPENFLOW CONNECTOR` object. Follow the complete [Openflow runbook](../openflow/README.md); the summary
 below does not replace its AWS trust-policy, controller-service, failure-queue, or rerun rules.
 
+After the one-time load, use the separate [recovery and live-demo restoration runbook](../openflow/RECOVERY.md).
+It preserves the private flow safely and prevents a restored insert-only flow from duplicating the
+already loaded rows.
+
 1. Verify that the four staged JSONL objects match `generated/manifest.json` and that the four target
    tables are empty.
 

@@ -84,15 +84,22 @@ The demo has deliberate readiness gates. Do not skip them.
    python scripts/estimate_volume.py
    ```
 
-5. Continue in order through [S3 and Iceberg](docs/05-s3-and-iceberg.md),
-   [Openflow](docs/06-openflow.md), [streaming](docs/07-snowpipe-streaming.md),
-   [Dynamic Tables](docs/08-dynamic-tables.md), and [Metabase](docs/10-metabase.md).
-6. Run the [demo scenario](docs/11-demo-scenario.md) only after both local validation and
-   `VALIDATION.ASSERT_DEMO_READY()` pass.
-7. Use [cleanup](docs/13-cleanup.md) immediately after the exercise.
+5. Follow [data generation](docs/04-data-generation.md) to review the generator’s input/output and
+   local validation gates.
+6. Upload and create managed history with [S3 and Iceberg](docs/05-s3-and-iceberg.md).
+7. Complete the one-time operational-file load with [Openflow](docs/06-openflow.md). For later
+   rehearsals, use [Openflow recovery](openflow/RECOVERY.md), not the one-time load steps.
+8. Complete the one-time event load with [Snowpipe Streaming](docs/07-snowpipe-streaming.md).
+9. Create, refresh, and verify the [Dynamic Tables](docs/08-dynamic-tables.md), then inspect the
+   governed [merchant data products](docs/09-merchant-data-products.md).
+10. Build and verify the [Metabase dashboard](docs/10-metabase.md).
+11. Run the [controlled demo scenario](docs/11-demo-scenario.md) only after the local gates and
+    `VALIDATION.ASSERT_DEMO_READY()` pass.
+12. Run the final [validation](docs/12-validation.md), then use [cleanup](docs/13-cleanup.md) to
+    return to the documented cost-safe state.
 
-The full guided path is indexed in [`docs/`](docs/00-architecture.md). SQL filenames begin with the
-same execution order. All commands assume the repository root as the current directory.
+All commands assume the repository root as the current directory. SQL filenames follow the same
+execution order; every chapter includes its own stop conditions and verification gate.
 
 ## Non-goals
 
@@ -118,6 +125,7 @@ private keys, profiles, and local Metabase state are ignored by Git.
 - [04 Data generation](docs/04-data-generation.md)
 - [05 S3 and Iceberg](docs/05-s3-and-iceberg.md)
 - [06 Openflow](docs/06-openflow.md)
+- [Openflow recovery and live-demo restoration](openflow/RECOVERY.md)
 - [07 Snowpipe Streaming](docs/07-snowpipe-streaming.md)
 - [08 Dynamic Tables](docs/08-dynamic-tables.md)
 - [09 Merchant data products](docs/09-merchant-data-products.md)

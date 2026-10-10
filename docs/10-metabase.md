@@ -22,7 +22,9 @@ Open `http://localhost:3000`. Connect Snowflake with a dedicated `TYPE=SERVICE` 
 by an RSA key pair. Keep the private PKCS #8 PEM file outside the repository with mode `600`; register
 only its public key in Snowflake. Grant the user only `RETAIL_DEMO_METABASE`, set that as its default
 role, set `DEFAULT_SECONDARY_ROLES = ()`, and use `RETAIL_DEMO_WH` as its default warehouse. Do not
-use the engineering user or role.
+use the engineering user or role. The bootstrap command in
+[02 — Snowflake setup](02-snowflake-setup.md#1-bootstrap-the-workspace) creates this user and
+registers the public key; Metabase receives the matching private key.
 
 Use these Metabase connection values:
 
@@ -71,16 +73,56 @@ Build the margin scorecard from `SUM(MARGIN_AT_RISK)` and label it `Margin at Ri
 `ESTIMATED_MARGIN_IMPACT` available in evidence views and tables; negative values are valid signed
 economics, not a dashboard error.
 
-## Verify the scorecards
+## Create the six saved questions
 
 Create each scorecard as a native SQL question against the Snowflake connection and save it with the
-name shown. Format the two monetary results as USD with two decimal places.
+name shown. Configure all `category`, `store`, `item`, and `supplier` variables below as optional,
+multi-value **Field Filters** using the mappings in the next section. Run each query with every
+filter empty before saving.
 
-| Saved question | Query expression | Expected tutorial result |
-| --- | --- | --- |
-| `At-Risk Item-Store Count` | `COUNT(*)` from `RETAIL_DEMO.SERVING.ROOT_CAUSE_EVIDENCE` | `24` |
-| `Estimated Lost Sales` | `ROUND(SUM(ESTIMATED_LOST_SALES), 2)` from `RETAIL_DEMO.SERVING.ROOT_CAUSE_EVIDENCE` | `USD 25,658.28` |
-| `Margin at Risk` | `ROUND(SUM(MARGIN_AT_RISK), 2)` from `RETAIL_DEMO.SERVING.ROOT_CAUSE_EVIDENCE` | `USD 3,631.55` |
+### At-Risk Item-Store Count
+
+```sql
+SELECT COUNT(*) AS "At-Risk Item-Store Count"
+FROM RETAIL_DEMO.SERVING.ROOT_CAUSE_EVIDENCE
+WHERE 1 = 1
+[[AND {{category}}]]
+[[AND {{store}}]]
+[[AND {{item}}]]
+[[AND {{supplier}}]];
+```
+
+Save as `At-Risk Item-Store Count`; the empty-filter result must be `24`.
+
+### Estimated Lost Sales
+
+```sql
+SELECT ROUND(SUM(ESTIMATED_LOST_SALES), 2) AS "Estimated Lost Sales"
+FROM RETAIL_DEMO.SERVING.ROOT_CAUSE_EVIDENCE
+WHERE 1 = 1
+[[AND {{category}}]]
+[[AND {{store}}]]
+[[AND {{item}}]]
+[[AND {{supplier}}]];
+```
+
+Save as `Estimated Lost Sales`, format it as USD with two decimal places, and require the
+empty-filter result `USD 25,658.28`.
+
+### Margin at Risk
+
+```sql
+SELECT ROUND(SUM(MARGIN_AT_RISK), 2) AS "Margin at Risk"
+FROM RETAIL_DEMO.SERVING.ROOT_CAUSE_EVIDENCE
+WHERE 1 = 1
+[[AND {{category}}]]
+[[AND {{store}}]]
+[[AND {{item}}]]
+[[AND {{supplier}}]];
+```
+
+Save as `Margin at Risk`, format it as USD with two decimal places, and require the empty-filter
+result `USD 3,631.55`.
 
 If the signed `ESTIMATED_MARGIN_IMPACT` is summed instead, this fixture returns `-USD 8,318.60`.
 That is valid evidence but is not the positive-only executive risk KPI. A different result from any
@@ -122,10 +164,70 @@ The deterministic fixture should return seven locked business dates, one categor
 negative shortfall. A `NULL` shortfall indicates missing merchant-plan data and is a stop condition;
 do not coerce it to zero in Metabase.
 
+## Build the two detail tables
+
+Create `Ranked Merchant Problems` with this complete SQL:
+
+```sql
+SELECT
+  IMPACT_RANK AS "Impact Rank",
+  BUSINESS_DATE AS "Business Date",
+  CATEGORY AS "Category",
+  STORE_ID AS "Store ID",
+  ITEM_ID AS "Item ID",
+  SUPPLIER_ID AS "Supplier ID",
+  ROOT_CAUSE AS "Root Cause",
+  ROUND(DAYS_OF_SUPPLY, 2) AS "Days of Supply",
+  ROUND(FILL_RATE, 4) AS "Fill Rate",
+  ROUND(ESTIMATED_LOST_SALES, 2) AS "Estimated Lost Sales",
+  ROUND(ESTIMATED_MARGIN_IMPACT, 2) AS "Estimated Margin Impact",
+  ROUND(MARGIN_AT_RISK, 2) AS "Margin at Risk"
+FROM RETAIL_DEMO.SERVING.ROOT_CAUSE_EVIDENCE
+WHERE 1 = 1
+[[AND {{category}}]]
+[[AND {{store}}]]
+[[AND {{item}}]]
+[[AND {{supplier}}]]
+ORDER BY IMPACT_RANK;
+```
+
+Create `Root Cause Evidence` with this complete SQL:
+
+```sql
+SELECT
+  IMPACT_RANK AS "Impact Rank",
+  BUSINESS_DATE AS "Business Date",
+  CATEGORY AS "Category",
+  STORE_ID AS "Store ID",
+  STORE_NAME AS "Store Name",
+  ITEM_ID AS "Item ID",
+  ITEM_DESC AS "Item Description",
+  SUPPLIER_ID AS "Supplier ID",
+  SUPPLIER_NAME AS "Supplier Name",
+  ROOT_CAUSE AS "Root Cause",
+  ROUND(AVG_DAILY_UNITS, 2) AS "Average Daily Units",
+  ON_HAND_QTY AS "On Hand Quantity",
+  ON_ORDER_QTY AS "On Order Quantity",
+  ROUND(DAYS_OF_SUPPLY, 2) AS "Days of Supply",
+  ROUND(FILL_RATE, 4) AS "Fill Rate",
+  ROUND(ESTIMATED_LOST_SALES, 2) AS "Estimated Lost Sales",
+  ROUND(ESTIMATED_MARGIN_IMPACT, 2) AS "Estimated Margin Impact",
+  ROUND(MARGIN_AT_RISK, 2) AS "Margin at Risk"
+FROM RETAIL_DEMO.SERVING.ROOT_CAUSE_EVIDENCE
+WHERE 1 = 1
+[[AND {{category}}]]
+[[AND {{store}}]]
+[[AND {{item}}]]
+[[AND {{supplier}}]]
+ORDER BY IMPACT_RANK;
+```
+
+Format fill rate as a percentage only if the Metabase format preserves the underlying decimal.
+Format the three monetary columns as USD with two decimal places.
+
 ## Add reusable SQL field filters
 
-Use these optional clauses in the three scorecards, `Ranked Merchant Problems`, and
-`Root Cause Evidence`:
+The five query definitions above already contain these optional clauses:
 
 ```sql
 WHERE 1 = 1
