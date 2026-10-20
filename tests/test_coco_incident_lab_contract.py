@@ -52,3 +52,31 @@ def test_coco_incident_lab_documentation_preserves_production_boundary() -> None
     assert "Do not run the fault or repair scripts against `RETAIL_DEMO`." in document
     assert "Openflow process group remains stopped" in document
     assert "INGESTED_AT" in document
+
+
+def test_coco_recovery_prompt_is_deterministic() -> None:
+    prompt = (ROOT / "coco/apply-approved-business-date-fix.md").read_text(encoding="utf-8")
+
+    assert "Do not create or revise a plan" in prompt
+    assert "snow sql -c retail_demo" in prompt
+    assert "05_fix_business_date_contract.sql" in prompt
+    assert "06_validate_recovery.sql" in prompt
+    assert "ALTER DYNAMIC TABLE RETAIL_DEMO_COCO_LAB.ANALYTICS.ITEM_STORE_DAY RESUME" in prompt
+    assert "175 expected rows and 0 unmatched" in prompt
+    assert "scheduling_state is `ACTIVE` or `RUNNING`" in prompt
+    assert "Do not run `01_create_healthy_pipeline.sql`" in prompt
+    assert "Do not run `03_inject_business_date_fault.sql`" in prompt
+    assert "Do not run `98_cleanup_sandbox.sql`" in prompt
+    assert "Do not suspend" in prompt
+
+
+def test_phase_two_step_four_contains_the_deterministic_recovery_prompt() -> None:
+    document = (ROOT / "docs/14-coco-incident-lab.md").read_text(encoding="utf-8")
+
+    assert "Phase 2, Step 4" in document
+    assert "Do not create or revise a plan" in document
+    assert "05_fix_business_date_contract.sql" in document
+    assert "06_validate_recovery.sql" in document
+    assert "175 expected rows and 0 unmatched" in document
+    assert "scheduling_state is ACTIVE or RUNNING" in document
+    assert "Do not suspend" in document

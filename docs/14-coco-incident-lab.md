@@ -105,28 +105,82 @@ PASS: controlled source-to-serving business-date fault detected
 This distinction is the point of the exercise: row counts and source dates can be correct while a
 downstream business-date join is wrong.
 
-## 4. Investigate with CoCo
+## 4. Phase 2, Step 4 — investigate and recover with CoCo
 
 Open [`coco/plan-business-date-incident.md`](../coco/plan-business-date-incident.md) and use its
 prompt in CoCo Plan mode. Verify that its plan is restricted to `RETAIL_DEMO_COCO_LAB`, identifies
-the date-join expression, and includes the documented recovery checks.
+the date-join expression, and explains why the source contract passes while the serving contract
+fails.
 
-Do not allow Agent mode until the plan has been reviewed and approved.
+Do not allow Agent mode until the investigation has been reviewed and approved. After approval,
+switch to Agent mode and paste this deterministic prompt exactly. Do not ask CoCo to generate
+another repair plan:
 
-## 5. Apply and prove the recovery
+```text
+Execute the approved sandbox recovery exactly as specified below. Do not create or revise a plan,
+substitute commands, broaden scope, or apply an alternative remediation.
 
-After approval, use the bounded Agent-mode prompt in
-[`coco/apply-approved-business-date-fix.md`](../coco/apply-approved-business-date-fix.md), or run the
-deterministic repository repair directly:
+Use snow sql -c retail_demo with role RETAIL_DEMO_ENGINEER. The only permitted target is
+RETAIL_DEMO_COCO_LAB. Run each numbered step only when the preceding step succeeds.
+
+1. Run exactly:
+   snow sql -c retail_demo -f sql/08_coco_incident_lab/05_fix_business_date_contract.sql
+
+2. Run exactly:
+   snow sql -c retail_demo -f sql/08_coco_incident_lab/06_validate_recovery.sql
+
+   Stop unless both contract checks are PASS with 175 expected rows and 0 unmatched, and the
+   assertion returns PASS: source business dates reconcile to the serving trend.
+
+3. Run read-only checks proving that:
+   - GET_DDL for ANALYTICS.CATEGORY_STORE_DAY contains
+     ON p.PLAN_DATE = d.BUSINESS_DATE and its merchant-plan join does not use INGESTED_AT;
+   - DYNAMIC_TABLE_REFRESH_HISTORY contains a new SUCCEEDED refresh after the repair; and
+   - SERVING.CATEGORY_SALES_TO_PLAN_TREND has 7 dates from 2002-12-28 through 2003-01-03,
+     0 NULL SALES_PLAN rows, and no negative SALES_SHORTFALL.
+
+4. Only after Steps 1-3 pass, run exactly:
+   snow sql -c retail_demo -q "ALTER DYNAMIC TABLE RETAIL_DEMO_COCO_LAB.ANALYTICS.ITEM_STORE_DAY RESUME;"
+
+5. Verify without changing state:
+   - SHOW DYNAMIC TABLES IN SCHEMA RETAIL_DEMO_COCO_LAB.ANALYTICS reports
+     scheduling_state is ACTIVE or RUNNING for CATEGORY_STORE_DAY and ITEM_STORE_DAY;
+     both labels mean scheduling is enabled, while SUSPENDED or any other value fails; and
+   - SHOW WAREHOUSES LIKE 'RETAIL_DEMO_WH' reports STARTED.
+
+Stop immediately on any error or unexpected result. Report the exact failing output and take no
+additional action.
+
+Do not run 01_create_healthy_pipeline.sql, 03_inject_business_date_fault.sql, or
+98_cleanup_sandbox.sql. Do not suspend a Dynamic Table or warehouse. Do not modify RETAIL_DEMO,
+RAW or Openflow data, the Openflow deployment or runtime, S3, roles, Metabase, or warehouse
+settings.
+
+When all gates pass, report the commands run, corrected join predicate, contract and assertion
+results, refresh result, trend summary, both Dynamic Table states, and warehouse state. Stop there.
+```
+
+The maintained copy of this prompt is
+[`coco/apply-approved-business-date-fix.md`](../coco/apply-approved-business-date-fix.md). If any
+instructions conflict, stop and use the maintained copy rather than combining them.
+
+## 5. Review and prove the recovery
+
+CoCo must stop after reporting the bounded recovery evidence. If Agent mode is unavailable, run the
+same deterministic repository repair directly:
 
 ```bash
 snow sql -c "$SNOWFLAKE_CONNECTION" \
   -f sql/08_coco_incident_lab/05_fix_business_date_contract.sql
 snow sql -c "$SNOWFLAKE_CONNECTION" \
   -f sql/08_coco_incident_lab/06_validate_recovery.sql
+snow sql -c "$SNOWFLAKE_CONNECTION" -q \
+  "ALTER DYNAMIC TABLE RETAIL_DEMO_COCO_LAB.ANALYTICS.ITEM_STORE_DAY RESUME;"
 ```
 
-The recovery assertion must return the healthy result. Query the sandbox serving view and compare it
+The recovery assertion must return the healthy result. Verify that both lab Dynamic Tables report
+`ACTIVE` or `RUNNING`, depending on the account's enabled Snowflake behavior-change bundle. Both
+mean scheduling is enabled; `SUSPENDED` does not. Then query the sandbox serving view and compare it
 with the working production trend before showing a separate, clearly labelled sandbox Metabase
 question. Do not edit the production dashboard.
 
