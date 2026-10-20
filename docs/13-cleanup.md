@@ -16,6 +16,17 @@ snow sql -c "$SNOWFLAKE_CONNECTION" -q \
 Export any sanitized Openflow flow definition you intend to retain. Runtime-local flow state can be
 lost when the runtime is removed.
 
+If the optional CoCo incident lab exists, it is a separate, fixed target. Inspect it and obtain
+explicit approval before removing it:
+
+```bash
+snow sql -c retail_demo_admin -q "SHOW DATABASES LIKE 'RETAIL_DEMO_COCO_LAB';"
+snow sql -c retail_demo_admin -f sql/08_coco_incident_lab/98_cleanup_sandbox.sql
+```
+
+The lab cleanup removes only `RETAIL_DEMO_COCO_LAB`; it never alters the working `RETAIL_DEMO`
+database.
+
 ## 2. Remove Openflow resources
 
 Confirm all processors are stopped, every queue is empty, and `SHOW OPENFLOW CONNECTORS` returns no

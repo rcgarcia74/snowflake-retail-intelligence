@@ -1,22 +1,17 @@
 # 00 — Architecture and execution map
 
-The demo is one decision journey, not a tour of unrelated products:
-
-> Sustained demand plus supplier under-fill prevents replenishment, inventory falls below two days
-> of supply, and the merchant sees the item/store exposure with evidence while action is still useful.
-
 ## Storage and ingestion boundaries
 
-| Data | System | Reason |
-|---|---|---|
-| TPC-DS sales, items, stores, dates | Existing Snowflake sample database | Governed analytical foundation and scale proof |
-| 90-day inventory, PO, supplier history | Snowflake-managed Iceberg using the tutorial S3 external volume | Open historical storage controlled by Snowflake's Iceberg catalog |
-| Current supplier, PO, receipt, plan | Snowflake native tables through Openflow | Low-frequency operational integration |
-| Seven-day POS and inventory events | Snowflake native tables through Snowpipe Streaming | Low-latency hot path |
-| Baselines, health, scorecard, problems, evidence | Dynamic Tables | Declarative, incrementally maintained products |
-| Dashboard | Metabase over secure serving views | BI contains presentation, not hidden business logic |
+| Data                                             | System                                                          | Reason                                                            |
+| ------------------------------------------------ | --------------------------------------------------------------- | ----------------------------------------------------------------- |
+| TPC-DS sales, items, stores, dates               | Existing Snowflake sample database                              | Governed analytical foundation and scale proof                    |
+| 90-day inventory, PO, supplier history           | Snowflake-managed Iceberg using the tutorial S3 external volume | Open historical storage controlled by Snowflake's Iceberg catalog |
+| Current supplier, PO, receipt, plan              | Snowflake native tables through Openflow                        | Low-frequency operational integration                             |
+| Seven-day POS and inventory events               | Snowflake native tables through Snowpipe Streaming              | Low-latency hot path                                              |
+| Baselines, health, scorecard, problems, evidence | Dynamic Tables                                                  | Declarative, incrementally maintained products                    |
+| Dashboard                                        | Metabase over secure serving views                              | BI contains presentation, not hidden business logic               |
 
-Parquet and Iceberg are not synonyms. Parquet is the file representation. Iceberg adds table
+Parquet and Iceberg are going to be used in this demo. Parquet is the file representation. Iceberg adds table
 metadata, snapshots, schema evolution, and transactional behavior. The generator's Parquet files
 land under `landing/history/`; Snowflake loads them and writes its own data and metadata under the
 separate `iceberg/` prefix.

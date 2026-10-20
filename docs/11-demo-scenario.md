@@ -77,4 +77,8 @@ Avoid an unbounded live prompt that changes schema or data. The strongest messag
 
 > CoCo accelerates the engineer; governed deterministic pipelines remain the source of truth.
 
+For a reproducible, sandbox-only CoCo investigation and recovery, follow
+[14 — CoCo incident lab](14-coco-incident-lab.md). Do not inject its deliberate fault into the
+working `RETAIL_DEMO` demo.
+
 Next: [validation](12-validation.md).

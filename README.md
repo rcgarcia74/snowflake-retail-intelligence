@@ -35,19 +35,19 @@ flowchart LR
     DT --> SERVE --> BI
 ```
 
-CoCo is the engineering copilot across discovery, SQL review, object creation, Openflow setup,
+CoCo is the data engineering copilot across discovery, SQL review, object creation, Openflow setup,
 validation, troubleshooting, and tuning. It is intentionally outside the runtime data path and is
 not used to generate hundreds of thousands of deterministic fixture values.
 
 ## What this repository creates
 
-| Layer | Objects | Retention / size |
-|---|---|---|
-| TPC-DS | 20 items, 25 stores, observed item/store pairs, 12-week baseline | Existing sample data |
-| Iceberg/S3 | Inventory, PO, and supplier-performance history | 90 days |
-| Snowflake hot | POS and inventory events plus current suppliers, POs, receipts, and plans | 7 days |
-| Analytics | Eight Dynamic Tables | 1–5 minute tutorial targets |
-| Serving | Scorecard, problems, root-cause evidence | Current derived state |
+| Layer         | Objects                                                                   | Retention / size            |
+| ------------- | ------------------------------------------------------------------------- | --------------------------- |
+| TPC-DS        | 20 items, 25 stores, observed item/store pairs, 12-week baseline          | Existing sample data        |
+| Iceberg/S3    | Inventory, PO, and supplier-performance history                           | 90 days                     |
+| Snowflake hot | POS and inventory events plus current suppliers, POs, receipts, and plans | 7 days                      |
+| Analytics     | Eight Dynamic Tables                                                      | 1–5 minute tutorial targets |
+| Serving       | Scorecard, problems, root-cause evidence                                  | Current derived state       |
 
 At the maximum 500 item/store pairs, the inventory history is 45,000 rows and weekly PO history is
 about 6,500 rows. Supplier history, plans, and hot events add only thousands more. The generator
@@ -71,10 +71,13 @@ the scale proof. Supplemental data demonstrates completeness and fresh behavior.
 The demo has deliberate readiness gates. Do not skip them.
 
 1. Read [architecture](docs/00-architecture.md) and [prerequisites](docs/01-prerequisites.md).
-2. Create the Snowflake workspace with [Snowflake setup](docs/02-snowflake-setup.md).
-3. Select and qualify the TPC-DS cohort with [cohort selection](docs/03-tpcds-cohort.md).
-4. Export the cohort, then generate and validate fixtures:
 
+2. Create the Snowflake workspace with [Snowflake setup](docs/02-snowflake-setup.md).
+
+3. Select and qualify the TPC-DS cohort with [cohort selection](docs/03-tpcds-cohort.md).
+
+4. Export the cohort, then generate and validate fixtures:
+   
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
@@ -86,15 +89,22 @@ The demo has deliberate readiness gates. Do not skip them.
 
 5. Follow [data generation](docs/04-data-generation.md) to review the generator’s input/output and
    local validation gates.
+
 6. Upload and create managed history with [S3 and Iceberg](docs/05-s3-and-iceberg.md).
+
 7. Complete the one-time operational-file load with [Openflow](docs/06-openflow.md). For later
    rehearsals, use [Openflow recovery](openflow/RECOVERY.md), not the one-time load steps.
+
 8. Complete the one-time event load with [Snowpipe Streaming](docs/07-snowpipe-streaming.md).
+
 9. Create, refresh, and verify the [Dynamic Tables](docs/08-dynamic-tables.md), then inspect the
    governed [merchant data products](docs/09-merchant-data-products.md).
+
 10. Build and verify the [Metabase dashboard](docs/10-metabase.md).
+
 11. Run the [controlled demo scenario](docs/11-demo-scenario.md) only after the local gates and
     `VALIDATION.ASSERT_DEMO_READY()` pass.
+
 12. Run the final [validation](docs/12-validation.md), then use [cleanup](docs/13-cleanup.md) to
     return to the documented cost-safe state.
 
@@ -108,7 +118,6 @@ execution order; every chapter includes its own stop conditions and verification
 - It does not place raw Parquet inside an Iceberg-owned prefix. Snowflake writes the Iceberg data
   and metadata after loading from a separate landing prefix.
 - It does not pre-insert the answer shown by the dashboard.
-- It does not require CoCo; the checked-in artifacts remain reviewable and runnable without it.
 
 ## Validation and security
 
